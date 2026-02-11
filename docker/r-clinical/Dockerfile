@@ -3,7 +3,14 @@ FROM rocker/r-ver:4.5.2
 LABEL org.omni-agents.component="r-executor"
 
 # Install system dependencies required by R packages
-RUN apt-get update && apt-get install -y \
+RUN echo 'Acquire::http::Pipeline-Depth "0";' > /etc/apt/apt.conf.d/99fixhash && \
+    echo 'Acquire::http::No-Cache=True;' >> /etc/apt/apt.conf.d/99fixhash && \
+    echo 'Acquire::BrokenProxy=true;' >> /etc/apt/apt.conf.d/99fixhash && \
+    echo 'Acquire::Retries "3";' >> /etc/apt/apt.conf.d/99fixhash && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
+    apt-get update && \
+    apt-get install -y \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \

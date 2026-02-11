@@ -39,6 +39,7 @@ output/
 # Secrets
 .env
 .env.*
+config.yaml
 
 # R artifacts (if any leak out of Docker)
 .Rhistory
