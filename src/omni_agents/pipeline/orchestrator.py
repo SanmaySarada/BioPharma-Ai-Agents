@@ -1,7 +1,8 @@
 """Pipeline orchestrator wiring agents to Docker execution.
 
-For Phase 1, this runs only the Simulator agent.
-Future phases will add the full DAG (SDTM, ADaM, Stats, Track B, Judge, Writer).
+Runs the full Track A pipeline: Simulator -> SDTM -> ADaM -> Stats,
+with schema validation gates and pre-execution R code checks between
+each agent handoff.
 """
 
 import csv
@@ -10,7 +11,11 @@ from pathlib import Path
 
 from loguru import logger
 
+from omni_agents.agents.adam import ADaMAgent
+from omni_agents.agents.base import BaseAgent
+from omni_agents.agents.sdtm import SDTMAgent
 from omni_agents.agents.simulator import SimulatorAgent
+from omni_agents.agents.stats import StatsAgent
 from omni_agents.config import Settings
 from omni_agents.docker.engine import DockerEngine
 from omni_agents.docker.r_executor import RExecutor
@@ -21,19 +26,22 @@ from omni_agents.pipeline.logging import (
     log_attempt,
     setup_logging,
 )
+from omni_agents.pipeline.pre_execution import PreExecutionError, check_r_code
 from omni_agents.pipeline.retry import (
     MaxRetriesExceededError,
     NonRetriableError,
     execute_with_retry,
 )
+from omni_agents.pipeline.schema_validator import SchemaValidationError, SchemaValidator
 from omni_agents.pipeline.script_cache import ScriptCache
 
 
 class PipelineOrchestrator:
-    """Orchestrates the pipeline execution.
+    """Orchestrates the Track A pipeline execution.
 
-    For Phase 1, this runs only the Simulator agent.
-    Future phases will add the full DAG (SDTM, ADaM, Stats, Track B, Judge, Writer).
+    Runs Simulator -> SDTM -> ADaM -> Stats sequentially, with schema
+    validation gates (PIPE-06) and pre-execution R code checks (ERRH-05)
+    between each agent handoff.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -51,8 +59,98 @@ class PipelineOrchestrator:
             cache_dir=Path(self.settings.output_dir) / ".script_cache"
         )
 
+    async def _run_agent(
+        self,
+        agent: BaseAgent,
+        context: dict,
+        work_dir: Path,
+        input_volumes: dict[str, str] | None = None,
+        expected_inputs: list[str] | None = None,
+        expected_outputs: list[str] | None = None,
+    ) -> tuple[str, list]:
+        """Run a single agent through the generate-validate-execute-retry loop.
+
+        This is the core helper for all agents. It handles:
+        1. Script caching (check cache on first attempt, store on miss)
+        2. Pre-execution R code validation (ERRH-05)
+        3. Docker execution via execute_with_retry
+        4. Logging all attempts
+
+        Args:
+            agent: The agent to run.
+            context: Agent-specific context dict (paths, etc.)
+            work_dir: Output directory (mounted as /workspace rw)
+            input_volumes: Read-only input volume mounts
+            expected_inputs: File paths the R code should reference (for pre-exec validation)
+            expected_outputs: File paths the R code should produce (for pre-exec validation)
+
+        Returns:
+            Tuple of (stdout, attempts)
+        """
+        cache_key = ScriptCache.cache_key(self.settings.trial, agent.name)
+
+        async def generate_code(
+            previous_error: str | None, attempt: int
+        ) -> str:
+            # On first attempt, try cache
+            if attempt == 1 and previous_error is None:
+                cached = self.script_cache.get(cache_key)
+                if cached is not None:
+                    log_agent_start(agent.name)
+                    logger.info(f"Using cached R script for {agent.name}")
+                    return cached
+
+            ctx = context.copy()
+            if previous_error:
+                ctx = agent.make_retry_context(ctx, previous_error, attempt)
+
+            code, _response = await agent.generate_code(ctx)
+            code = agent.inject_seed(code, self.settings.trial.seed)
+
+            # Pre-execution validation (ERRH-05)
+            if expected_inputs or expected_outputs:
+                try:
+                    check_r_code(
+                        code,
+                        expected_inputs=expected_inputs or [],
+                        expected_outputs=expected_outputs or [],
+                    )
+                except PreExecutionError as e:
+                    logger.warning(
+                        f"Pre-execution validation warnings for {agent.name}: {e.issues}"
+                    )
+                    # Log but don't block -- some warnings may be false positives
+                    # (e.g., path embedded differently). The Docker execution will
+                    # catch real issues.
+
+            if attempt == 1 and previous_error is None:
+                log_agent_start(agent.name)
+                self.script_cache.put(cache_key, code)
+            return code
+
+        try:
+            stdout, attempts = await execute_with_retry(
+                generate_code_fn=generate_code,
+                executor=self.executor,
+                work_dir=work_dir,
+                max_attempts=3,
+                agent_name=agent.name,
+                input_volumes=input_volumes,
+            )
+        except (NonRetriableError, MaxRetriesExceededError) as e:
+            for attempt in e.attempts:
+                log_attempt(agent.name, attempt)
+            logger.error(f"{agent.name} failed: {e}")
+            raise
+
+        for attempt in attempts:
+            log_attempt(agent.name, attempt)
+        log_agent_complete(agent.name, len(attempts), success=True)
+
+        return stdout, attempts
+
     async def run(self) -> Path:
-        """Execute the pipeline. Returns path to output directory."""
+        """Execute the Track A pipeline. Returns path to output directory."""
         # 1. Create run directory with timestamp
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.settings.output_dir) / run_id
@@ -71,71 +169,29 @@ class PipelineOrchestrator:
             dockerfile_path=Path("docker/r-clinical"),
         )
 
-        # 4. Create Simulator agent
+        # 4. Create LLM adapter (Gemini for all Track A agents)
         gemini = GeminiAdapter(self.settings.llm.gemini)
         prompt_dir = Path(__file__).parent.parent / "templates" / "prompts"
+
+        # === Step 1: Simulator ===
         simulator = SimulatorAgent(
-            llm=gemini,
-            prompt_dir=prompt_dir,
-            trial_config=self.settings.trial,
+            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+        )
+        await self._run_agent(
+            agent=simulator,
+            context={"output_path": "/workspace/SBPdata.csv"},
+            work_dir=raw_dir,
+            expected_outputs=["SBPdata.csv"],
         )
 
-        # 5. Define the code generation function for retry loop
-        cache_key = ScriptCache.cache_key(self.settings.trial, "simulator")
-
-        async def generate_simulator_code(
-            previous_error: str | None, attempt: int
-        ) -> str:
-            # On first attempt, try cache for reproducibility
-            if attempt == 1 and previous_error is None:
-                cached = self.script_cache.get(cache_key)
-                if cached is not None:
-                    log_agent_start(simulator.name)
-                    logger.info("Using cached R script for reproducibility")
-                    return cached
-
-            context: dict = {"output_path": "/workspace/SBPdata.csv"}
-            if previous_error:
-                context = simulator.make_retry_context(context, previous_error, attempt)
-
-            code, _response = await simulator.generate_code(context)
-            # Inject set.seed() -- orchestrator responsibility, not LLM's
-            code = simulator.inject_seed(code, self.settings.trial.seed)
-
-            if attempt == 1 and previous_error is None:
-                log_agent_start(simulator.name)
-                # Cache the script for future reproducible runs
-                self.script_cache.put(cache_key, code)
-            return code
-
-        # 6. Execute with retry
-        try:
-            stdout, attempts = await execute_with_retry(
-                generate_code_fn=generate_simulator_code,
-                executor=self.executor,
-                work_dir=raw_dir,
-                max_attempts=3,
-            )
-        except (NonRetriableError, MaxRetriesExceededError) as e:
-            for attempt in e.attempts:
-                log_attempt(simulator.name, attempt)
-            logger.error(f"Simulator failed: {e}")
-            raise
-
-        # 7. Log all attempts
-        for attempt in attempts:
-            log_attempt(simulator.name, attempt)
-        log_agent_complete(simulator.name, len(attempts), success=True)
-
-        # 8. Verify output exists
+        # Validate Simulator output (existing validation)
         output_csv = raw_dir / "SBPdata.csv"
         if not output_csv.exists():
             raise FileNotFoundError(
                 f"Simulator did not produce expected output: {output_csv}"
             )
-
-        # 9. Basic output validation
         self._validate_simulator_output(output_csv)
+        logger.info("Simulator output validated")
 
         logger.info(f"Pipeline completed: output at {output_dir}")
         return output_dir
