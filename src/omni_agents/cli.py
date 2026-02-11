@@ -70,3 +70,7 @@ def run(
         )
         error_display.show_error(agent_name, error_class, message, suggestion)
         raise typer.Exit(code=1) from None
+
+
+if __name__ == "__main__":
+    app()
