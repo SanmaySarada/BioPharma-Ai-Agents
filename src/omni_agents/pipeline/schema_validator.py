@@ -311,4 +311,82 @@ class SchemaValidator:
         if issues:
             raise SchemaValidationError("Stats", issues)
 
-        logger.info("Stats validation passed: all {} expected files present", len(STATS_EXPECTED_FILES))
+        logger.info(
+            "Stats validation passed: all {} expected files present",
+            len(STATS_EXPECTED_FILES),
+        )
+
+    @classmethod
+    def validate_track_b(cls, track_b_dir: Path) -> None:
+        """Validate Track B validation.json structure (DBLP-05).
+
+        Checks:
+        - validation.json exists in ``track_b_dir``
+        - File contains valid JSON
+        - Required top-level keys: validator_p_value, validator_hr, metadata
+        - Required metadata subkeys: n_subjects, n_events, n_censored
+        - validator_p_value and validator_hr are numeric (int or float)
+        - Metadata values are integers
+
+        Args:
+            track_b_dir: Directory containing validation.json.
+
+        Raises:
+            SchemaValidationError: If any validation check fails.
+        """
+        issues: list[str] = []
+
+        validation_path = track_b_dir / "validation.json"
+        if not validation_path.exists():
+            issues.append("validation.json not found in Track B output directory")
+            raise SchemaValidationError("Track B", issues)
+
+        # Parse JSON
+        try:
+            data = json.loads(validation_path.read_text())
+        except json.JSONDecodeError as e:
+            issues.append(f"validation.json: invalid JSON: {e}")
+            raise SchemaValidationError("Track B", issues) from e
+
+        # Required top-level keys
+        required_top = {"validator_p_value", "validator_hr", "metadata"}
+        missing_top = required_top - set(data.keys())
+        if missing_top:
+            issues.append(
+                f"validation.json: missing required top-level keys: "
+                f"{sorted(missing_top)}"
+            )
+
+        # Required metadata subkeys
+        metadata = data.get("metadata")
+        if metadata is None and "metadata" not in missing_top:
+            issues.append("validation.json: 'metadata' is null")
+        elif isinstance(metadata, dict):
+            required_meta = {"n_subjects", "n_events", "n_censored"}
+            missing_meta = required_meta - set(metadata.keys())
+            if missing_meta:
+                issues.append(
+                    f"validation.json metadata: missing required keys: "
+                    f"{sorted(missing_meta)}"
+                )
+
+            # Metadata value type checks (integers)
+            for key in ("n_subjects", "n_events", "n_censored"):
+                if key in metadata and not isinstance(metadata[key], int):
+                    issues.append(
+                        f"validation.json metadata.{key}: expected int, "
+                        f"got {type(metadata[key]).__name__}"
+                    )
+
+        # Numeric type checks for top-level values
+        for key in ("validator_p_value", "validator_hr"):
+            if key in data and not isinstance(data[key], (int, float)):
+                issues.append(
+                    f"validation.json {key}: expected numeric, "
+                    f"got {type(data[key]).__name__}"
+                )
+
+        if issues:
+            raise SchemaValidationError("Track B", issues)
+
+        logger.info("Track B validation passed: validation.json structure OK")
