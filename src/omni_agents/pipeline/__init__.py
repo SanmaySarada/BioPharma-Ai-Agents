@@ -7,6 +7,11 @@ from omni_agents.pipeline.logging import (
     setup_logging,
 )
 from omni_agents.pipeline.orchestrator import PipelineOrchestrator
+from omni_agents.pipeline.pre_execution import (
+    PreExecutionError,
+    check_r_code,
+    validate_r_code,
+)
 from omni_agents.pipeline.retry import (
     MaxRetriesExceededError,
     NonRetriableError,
@@ -14,11 +19,19 @@ from omni_agents.pipeline.retry import (
     execute_with_retry,
     is_retriable,
 )
+from omni_agents.pipeline.schema_validator import (
+    SchemaValidationError,
+    SchemaValidator,
+)
 
 __all__ = [
     "MaxRetriesExceededError",
     "NonRetriableError",
     "PipelineOrchestrator",
+    "PreExecutionError",
+    "SchemaValidationError",
+    "SchemaValidator",
+    "check_r_code",
     "classify_error",
     "execute_with_retry",
     "is_retriable",
@@ -26,4 +39,5 @@ __all__ = [
     "log_agent_start",
     "log_attempt",
     "setup_logging",
+    "validate_r_code",
 ]
