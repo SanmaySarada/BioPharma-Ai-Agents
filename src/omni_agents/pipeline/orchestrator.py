@@ -9,7 +9,7 @@ import asyncio
 import csv
 import json
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
@@ -26,6 +26,7 @@ from omni_agents.docker.r_executor import RExecutor
 from omni_agents.llm.gemini import GeminiAdapter
 from omni_agents.llm.openai_adapter import OpenAIAdapter
 from omni_agents.models.consensus import Verdict
+from omni_agents.models.pipeline import PipelineState, StepResult, StepState, StepStatus
 from omni_agents.pipeline.consensus import ConsensusHaltError, ConsensusJudge
 from omni_agents.pipeline.logging import (
     log_agent_complete,
@@ -158,12 +159,59 @@ class PipelineOrchestrator:
 
         return stdout, attempts
 
+    def _record_step(
+        self,
+        state: PipelineState,
+        state_path: Path,
+        name: str,
+        agent_type: str,
+        track: str,
+        attempts: list,
+        status: StepStatus = StepStatus.COMPLETED,
+    ) -> None:
+        """Record a completed agent step in pipeline state and persist to disk."""
+        step_results = []
+        for attempt in attempts:
+            step_results.append(
+                StepResult(
+                    success=attempt.error_class is None,
+                    output=(
+                        attempt.docker_result.stdout[:500]
+                        if attempt.docker_result
+                        else None
+                    ),
+                    error=(
+                        attempt.docker_result.stderr[:500]
+                        if attempt.docker_result and attempt.error_class
+                        else None
+                    ),
+                    code=attempt.generated_code[:200],
+                    attempt=attempt.attempt_number,
+                    duration_seconds=(
+                        attempt.docker_result.duration_seconds
+                        if attempt.docker_result
+                        else 0
+                    ),
+                )
+            )
+        state.steps[name] = StepState(
+            name=name,
+            agent_type=agent_type,
+            track=track,
+            status=status,
+            attempts=step_results,
+        )
+        state.current_step = name
+        state.save(state_path)
+
     async def _run_track_a(
         self,
         raw_dir: Path,
         output_dir: Path,
         gemini: GeminiAdapter,
         prompt_dir: Path,
+        state: PipelineState,
+        state_path: Path,
     ) -> Path:
         """Run Track A pipeline: SDTM -> ADaM -> Stats.
 
@@ -172,6 +220,8 @@ class PipelineOrchestrator:
             output_dir: Run output directory.
             gemini: GeminiAdapter for Track A LLM calls.
             prompt_dir: Path to prompt templates.
+            state: Pipeline state for step recording.
+            state_path: Path to pipeline_state.json.
 
         Returns:
             Path to Track A ``results.json``.
@@ -183,7 +233,7 @@ class PipelineOrchestrator:
         sdtm_agent = SDTMAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
-        await self._run_agent(
+        _stdout, sdtm_attempts = await self._run_agent(
             agent=sdtm_agent,
             context={
                 "input_path": "/workspace/input/SBPdata.csv",
@@ -193,6 +243,9 @@ class PipelineOrchestrator:
             input_volumes={str(raw_dir): "/workspace/input"},
             expected_inputs=["/workspace/input/SBPdata.csv"],
             expected_outputs=["DM.csv", "VS.csv"],
+        )
+        self._record_step(
+            state, state_path, "sdtm", "SDTMAgent", "track_a", sdtm_attempts
         )
 
         # Validate SDTM output (PIPE-06)
@@ -206,7 +259,7 @@ class PipelineOrchestrator:
         adam_agent = ADaMAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
-        await self._run_agent(
+        _stdout, adam_attempts = await self._run_agent(
             agent=adam_agent,
             context={
                 "input_dir": "/workspace/input",
@@ -216,6 +269,9 @@ class PipelineOrchestrator:
             input_volumes={str(sdtm_dir): "/workspace/input"},
             expected_inputs=["DM.csv", "VS.csv"],
             expected_outputs=["ADTTE.rds", "ADTTE_summary.json"],
+        )
+        self._record_step(
+            state, state_path, "adam", "ADaMAgent", "track_a", adam_attempts
         )
 
         # Validate ADaM output (PIPE-06)
@@ -229,7 +285,7 @@ class PipelineOrchestrator:
         stats_agent = StatsAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
-        await self._run_agent(
+        _stdout, stats_attempts = await self._run_agent(
             agent=stats_agent,
             context={
                 "adam_dir": "/workspace/adam",
@@ -244,6 +300,9 @@ class PipelineOrchestrator:
             expected_inputs=["ADTTE.rds", "DM.csv"],
             expected_outputs=["results.json", "km_plot.png"],
         )
+        self._record_step(
+            state, state_path, "stats", "StatsAgent", "track_a", stats_attempts
+        )
 
         # Validate Stats output (PIPE-06)
         SchemaValidator.validate_stats(stats_dir)
@@ -257,6 +316,8 @@ class PipelineOrchestrator:
         output_dir: Path,
         openai: OpenAIAdapter,
         prompt_dir: Path,
+        state: PipelineState,
+        state_path: Path,
     ) -> Path:
         """Run Track B pipeline: DoubleProgrammerAgent independent validation.
 
@@ -268,6 +329,8 @@ class PipelineOrchestrator:
             output_dir: Run output directory.
             openai: OpenAIAdapter for Track B LLM calls.
             prompt_dir: Path to prompt templates.
+            state: Pipeline state for step recording.
+            state_path: Path to pipeline_state.json.
 
         Returns:
             Path to Track B ``validation.json``.
@@ -280,7 +343,7 @@ class PipelineOrchestrator:
             prompt_dir=prompt_dir,
             trial_config=self.settings.trial,
         )
-        await self._run_agent(
+        _stdout, dp_attempts = await self._run_agent(
             agent=agent,
             context={
                 "input_path": "/workspace/input/SBPdata.csv",
@@ -292,6 +355,14 @@ class PipelineOrchestrator:
             input_volumes={str(raw_dir): "/workspace/input"},
             expected_inputs=["/workspace/input/SBPdata.csv"],
             expected_outputs=["validation.json"],
+        )
+        self._record_step(
+            state,
+            state_path,
+            "double_programmer",
+            "DoubleProgrammerAgent",
+            "track_b",
+            dp_attempts,
         )
 
         # Validate Track B output (PIPE-06 for Track B)
@@ -320,6 +391,14 @@ class PipelineOrchestrator:
         setup_logging(logs_dir, run_id)
         logger.info(f"Pipeline started: run_id={run_id}")
 
+        # Initialize pipeline state (PIPE-05)
+        state = PipelineState(
+            run_id=run_id,
+            started_at=datetime.now(tz=UTC),
+        )
+        state_path = output_dir / "pipeline_state.json"
+        state.save(state_path)  # Initial save with empty steps
+
         # 3. Ensure Docker image is available
         self.engine.ensure_image(
             self.settings.docker.image,
@@ -334,11 +413,14 @@ class PipelineOrchestrator:
         simulator = SimulatorAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
-        await self._run_agent(
+        _stdout, sim_attempts = await self._run_agent(
             agent=simulator,
             context={"output_path": "/workspace/SBPdata.csv"},
             work_dir=raw_dir,
             expected_outputs=["SBPdata.csv"],
+        )
+        self._record_step(
+            state, state_path, "simulator", "SimulatorAgent", "shared", sim_attempts
         )
 
         # Validate Simulator output (existing validation)
@@ -355,8 +437,12 @@ class PipelineOrchestrator:
 
         t_start = time.monotonic()
         track_a_result, track_b_result = await asyncio.gather(
-            self._run_track_a(raw_dir, output_dir, gemini, prompt_dir),
-            self._run_track_b(raw_dir, output_dir, openai, prompt_dir),
+            self._run_track_a(
+                raw_dir, output_dir, gemini, prompt_dir, state, state_path
+            ),
+            self._run_track_b(
+                raw_dir, output_dir, openai, prompt_dir, state, state_path
+            ),
         )
         t_parallel = time.monotonic() - t_start
         logger.info(f"Parallel execution completed in {t_parallel:.1f}s")
@@ -374,8 +460,28 @@ class PipelineOrchestrator:
         verdict_path.write_text(verdict.model_dump_json(indent=2))
         logger.info(f"Consensus verdict: {verdict.verdict.value}")
 
+        # Record consensus step
+        state.steps["consensus"] = StepState(
+            name="consensus",
+            agent_type="ConsensusJudge",
+            track="shared",
+            status=StepStatus.COMPLETED,
+            attempts=[
+                StepResult(
+                    success=True,
+                    output=f"Verdict: {verdict.verdict.value}",
+                    attempt=1,
+                    duration_seconds=0,
+                )
+            ],
+        )
+        state.current_step = "consensus"
+        state.save(state_path)
+
         # Handle verdict (PIPE-04)
         if verdict.verdict == Verdict.HALT:
+            state.status = "failed"
+            state.save(state_path)
             # Save diagnostic report (JUDG-06)
             diag_path = consensus_dir / "diagnostic_report.json"
             diag_path.write_text(
@@ -401,6 +507,9 @@ class PipelineOrchestrator:
             #   Key: comparisons (list of per-metric comparison objects)
             #   Phase 4 should check verdict == "WARNING" and include
             #   boundary_warnings in the report narrative when present.
+
+        state.status = "completed"
+        state.save(state_path)
 
         logger.info(f"Pipeline completed: output at {output_dir}")
         return output_dir
