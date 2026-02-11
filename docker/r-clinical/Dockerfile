@@ -23,7 +23,7 @@ RUN echo 'Acquire::http::Pipeline-Depth "0";' > /etc/apt/apt.conf.d/99fixhash &&
 
 # Use Posit Package Manager for pre-compiled Linux binaries (avoids 30-min source compilation)
 RUN R -e "options(repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/noble/latest')); \
-    install.packages(c('survival', 'survminer', 'tidyverse', 'haven', 'jsonlite', 'readr', 'ggplot2', 'broom'))"
+    install.packages(c('survival', 'survminer', 'tidyverse', 'haven', 'jsonlite', 'readr', 'ggplot2', 'broom', 'tableone'))"
 
 # Copy healthcheck script to verify all packages load
 COPY healthcheck.R /opt/healthcheck.R

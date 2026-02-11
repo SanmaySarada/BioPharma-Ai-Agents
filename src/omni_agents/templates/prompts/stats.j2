@@ -39,7 +39,7 @@ vs <- read.csv("path/VS.csv")
 
 # Extract baseline SBP from VS
 baseline_sbp <- vs %>%
-  filter(VSTESTCD == "SBP", VSBLFL == "Y") %>%
+  filter(VSTESTCD == "SYSBP", VSBLFL == "Y") %>%
   select(USUBJID, BASELINE_SBP = VSSTRESN)
 
 # Merge baseline SBP into demographics
