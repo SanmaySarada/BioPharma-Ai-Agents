@@ -106,16 +106,16 @@ km_plot <- ggsurvplot(
   ggtheme = theme_minimal()
 )
 
-ggsave(
-  "path/km_plot.png",
-  plot = print(km_plot),
-  width = 10,
-  height = 8,
-  dpi = 300
-)
+# IMPORTANT: ggsurvplot returns a composite list, NOT a single ggplot.
+# ggsave does not work with survminer composite objects.
+# Use explicit png()/dev.off() instead.
+png("path/km_plot.png", width = 3000, height = 2400, res = 300)
+print(km_plot)
+dev.off()
 ```
 
 The KM plot MUST include `risk.table = TRUE` for the number-at-risk table below the x-axis.
+Do NOT use ggsave() for the KM plot -- ggsurvplot returns a composite list of plots (main + risk table), and ggsave cannot handle it. Always use `png()`/`print()`/`dev.off()`.
 
 ## Output 5 -- Structured JSON: results.json
 
