@@ -1,11 +1,14 @@
 """Pipeline orchestrator wiring agents to Docker execution.
 
-Runs the full Track A pipeline: Simulator -> SDTM -> ADaM -> Stats,
-with schema validation gates and pre-execution R code checks between
-each agent handoff.
+Runs the full pipeline: Simulator -> fork(Track A, Track B) -> ConsensusJudge,
+with schema validation gates and pre-execution R code checks between each
+agent handoff.  Track A uses Gemini; Track B uses GPT-4 for model diversity.
 """
 
+import asyncio
 import csv
+import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +16,7 @@ from loguru import logger
 
 from omni_agents.agents.adam import ADaMAgent
 from omni_agents.agents.base import BaseAgent
+from omni_agents.agents.double_programmer import DoubleProgrammerAgent
 from omni_agents.agents.sdtm import SDTMAgent
 from omni_agents.agents.simulator import SimulatorAgent
 from omni_agents.agents.stats import StatsAgent
@@ -20,6 +24,9 @@ from omni_agents.config import Settings
 from omni_agents.docker.engine import DockerEngine
 from omni_agents.docker.r_executor import RExecutor
 from omni_agents.llm.gemini import GeminiAdapter
+from omni_agents.llm.openai_adapter import OpenAIAdapter
+from omni_agents.models.consensus import Verdict
+from omni_agents.pipeline.consensus import ConsensusHaltError, ConsensusJudge
 from omni_agents.pipeline.logging import (
     log_agent_complete,
     log_agent_start,
@@ -37,11 +44,13 @@ from omni_agents.pipeline.script_cache import ScriptCache
 
 
 class PipelineOrchestrator:
-    """Orchestrates the Track A pipeline execution.
+    """Orchestrates Track A + Track B parallel pipeline with consensus gating.
 
-    Runs Simulator -> SDTM -> ADaM -> Stats sequentially, with schema
-    validation gates (PIPE-06) and pre-execution R code checks (ERRH-05)
-    between each agent handoff.
+    Runs Simulator sequentially (both tracks need the raw data), then forks
+    Track A (Gemini: SDTM -> ADaM -> Stats) and Track B (GPT-4: independent
+    validation) in parallel via ``asyncio.gather()``.  After both tracks
+    complete, the ConsensusJudge compares results and the pipeline proceeds
+    (PASS/WARNING) or halts (HALT).
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -149,51 +158,25 @@ class PipelineOrchestrator:
 
         return stdout, attempts
 
-    async def run(self) -> Path:
-        """Execute the Track A pipeline. Returns path to output directory."""
-        # 1. Create run directory with timestamp
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = Path(self.settings.output_dir) / run_id
-        raw_dir = output_dir / "raw"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        logs_dir = output_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
+    async def _run_track_a(
+        self,
+        raw_dir: Path,
+        output_dir: Path,
+        gemini: GeminiAdapter,
+        prompt_dir: Path,
+    ) -> Path:
+        """Run Track A pipeline: SDTM -> ADaM -> Stats.
 
-        # 2. Setup logging
-        setup_logging(logs_dir, run_id)
-        logger.info(f"Pipeline started: run_id={run_id}")
+        Args:
+            raw_dir: Directory containing raw SBPdata.csv.
+            output_dir: Run output directory.
+            gemini: GeminiAdapter for Track A LLM calls.
+            prompt_dir: Path to prompt templates.
 
-        # 3. Ensure Docker image is available
-        self.engine.ensure_image(
-            self.settings.docker.image,
-            dockerfile_path=Path("docker/r-clinical"),
-        )
-
-        # 4. Create LLM adapter (Gemini for all Track A agents)
-        gemini = GeminiAdapter(self.settings.llm.gemini)
-        prompt_dir = Path(__file__).parent.parent / "templates" / "prompts"
-
-        # === Step 1: Simulator ===
-        simulator = SimulatorAgent(
-            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
-        )
-        await self._run_agent(
-            agent=simulator,
-            context={"output_path": "/workspace/SBPdata.csv"},
-            work_dir=raw_dir,
-            expected_outputs=["SBPdata.csv"],
-        )
-
-        # Validate Simulator output (existing validation)
-        output_csv = raw_dir / "SBPdata.csv"
-        if not output_csv.exists():
-            raise FileNotFoundError(
-                f"Simulator did not produce expected output: {output_csv}"
-            )
-        self._validate_simulator_output(output_csv)
-        logger.info("Simulator output validated")
-
-        # === Step 2: SDTM Agent ===
+        Returns:
+            Path to Track A ``results.json``.
+        """
+        # === SDTM Agent ===
         sdtm_dir = output_dir / "track_a" / "sdtm"
         sdtm_dir.mkdir(parents=True, exist_ok=True)
 
@@ -216,7 +199,7 @@ class PipelineOrchestrator:
         SchemaValidator.validate_sdtm(sdtm_dir, self.settings.trial.n_subjects)
         logger.info("SDTM schema validation passed")
 
-        # === Step 3: ADaM Agent ===
+        # === ADaM Agent ===
         adam_dir = output_dir / "track_a" / "adam"
         adam_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +222,7 @@ class PipelineOrchestrator:
         SchemaValidator.validate_adam(adam_dir, self.settings.trial.n_subjects)
         logger.info("ADaM schema validation passed")
 
-        # === Step 4: Stats Agent ===
+        # === Stats Agent ===
         stats_dir = output_dir / "track_a" / "stats"
         stats_dir.mkdir(parents=True, exist_ok=True)
 
@@ -266,7 +249,160 @@ class PipelineOrchestrator:
         SchemaValidator.validate_stats(stats_dir)
         logger.info("Stats schema validation passed")
 
-        logger.info(f"Track A pipeline completed: output at {output_dir}")
+        return stats_dir / "results.json"
+
+    async def _run_track_b(
+        self,
+        raw_dir: Path,
+        output_dir: Path,
+        openai: OpenAIAdapter,
+        prompt_dir: Path,
+    ) -> Path:
+        """Run Track B pipeline: DoubleProgrammerAgent independent validation.
+
+        Track B receives ONLY raw SBPdata.csv -- no access to Track A outputs.
+        This enforces isolation (ISOL-01 through ISOL-03).
+
+        Args:
+            raw_dir: Directory containing raw SBPdata.csv.
+            output_dir: Run output directory.
+            openai: OpenAIAdapter for Track B LLM calls.
+            prompt_dir: Path to prompt templates.
+
+        Returns:
+            Path to Track B ``validation.json``.
+        """
+        track_b_dir = output_dir / "track_b"
+        track_b_dir.mkdir(parents=True, exist_ok=True)
+
+        agent = DoubleProgrammerAgent(
+            llm=openai,
+            prompt_dir=prompt_dir,
+            trial_config=self.settings.trial,
+        )
+        await self._run_agent(
+            agent=agent,
+            context={
+                "input_path": "/workspace/input/SBPdata.csv",
+                "output_dir": "/workspace",
+            },
+            work_dir=track_b_dir,
+            # CRITICAL ISOLATION (ISOL-01, ISOL-02, ISOL-03):
+            # Track B only sees raw data. No sdtm_dir, adam_dir, or stats_dir.
+            input_volumes={str(raw_dir): "/workspace/input"},
+            expected_inputs=["/workspace/input/SBPdata.csv"],
+            expected_outputs=["validation.json"],
+        )
+
+        # Validate Track B output (PIPE-06 for Track B)
+        SchemaValidator.validate_track_b(track_b_dir)
+        logger.info("Track B schema validation passed")
+
+        return track_b_dir / "validation.json"
+
+    async def run(self) -> Path:
+        """Execute the full pipeline with parallel tracks and consensus gate.
+
+        Flow: Simulator -> fork(Track A, Track B) -> ConsensusJudge.
+
+        Returns:
+            Path to the run output directory.
+        """
+        # 1. Create run directory with timestamp
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(self.settings.output_dir) / run_id
+        raw_dir = output_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir = output_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+
+        # 2. Setup logging
+        setup_logging(logs_dir, run_id)
+        logger.info(f"Pipeline started: run_id={run_id}")
+
+        # 3. Ensure Docker image is available
+        self.engine.ensure_image(
+            self.settings.docker.image,
+            dockerfile_path=Path("docker/r-clinical"),
+        )
+
+        # 4. Create LLM adapters and prompt directory
+        gemini = GeminiAdapter(self.settings.llm.gemini)
+        prompt_dir = Path(__file__).parent.parent / "templates" / "prompts"
+
+        # === Step 1: Simulator (sequential -- both tracks need raw data) ===
+        simulator = SimulatorAgent(
+            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+        )
+        await self._run_agent(
+            agent=simulator,
+            context={"output_path": "/workspace/SBPdata.csv"},
+            work_dir=raw_dir,
+            expected_outputs=["SBPdata.csv"],
+        )
+
+        # Validate Simulator output (existing validation)
+        output_csv = raw_dir / "SBPdata.csv"
+        if not output_csv.exists():
+            raise FileNotFoundError(
+                f"Simulator did not produce expected output: {output_csv}"
+            )
+        self._validate_simulator_output(output_csv)
+        logger.info("Simulator output validated")
+
+        # === Step 2: Fork -- parallel Track A and Track B (PIPE-03) ===
+        openai = OpenAIAdapter(self.settings.llm.openai)
+
+        t_start = time.monotonic()
+        track_a_result, track_b_result = await asyncio.gather(
+            self._run_track_a(raw_dir, output_dir, gemini, prompt_dir),
+            self._run_track_b(raw_dir, output_dir, openai, prompt_dir),
+        )
+        t_parallel = time.monotonic() - t_start
+        logger.info(f"Parallel execution completed in {t_parallel:.1f}s")
+
+        # === Step 3: Consensus gate (PIPE-04, ISOL-04) ===
+        # Create consensus directory ONLY after both tracks complete (ISOL-04)
+        consensus_dir = output_dir / "consensus"
+        consensus_dir.mkdir(parents=True, exist_ok=True)
+
+        # Run consensus comparison
+        verdict = ConsensusJudge.compare(track_a_result, track_b_result)
+
+        # Save verdict to consensus directory
+        verdict_path = consensus_dir / "verdict.json"
+        verdict_path.write_text(verdict.model_dump_json(indent=2))
+        logger.info(f"Consensus verdict: {verdict.verdict.value}")
+
+        # Handle verdict (PIPE-04)
+        if verdict.verdict == Verdict.HALT:
+            # Save diagnostic report (JUDG-06)
+            diag_path = consensus_dir / "diagnostic_report.json"
+            diag_path.write_text(
+                json.dumps(verdict.to_diagnostic_report(), indent=2)
+            )
+            logger.error(
+                f"CONSENSUS HALT: {verdict.investigation_hints}"
+            )
+            raise ConsensusHaltError(verdict)
+
+        if verdict.verdict == Verdict.WARNING:
+            logger.warning(
+                f"CONSENSUS WARNING: proceeding with caution. "
+                f"Boundary warnings: {verdict.boundary_warnings}"
+            )
+            # Pipeline proceeds -- verdict.json in consensus_dir carries the
+            # flag for Phase 4 Medical Writer to read (JUDG-05 contract).
+            #
+            # Phase 4 contract (JUDG-05):
+            #   File: {output_dir}/consensus/verdict.json
+            #   Key: verdict (string: "PASS", "WARNING", or "HALT")
+            #   Key: boundary_warnings (list of strings, may be empty)
+            #   Key: comparisons (list of per-metric comparison objects)
+            #   Phase 4 should check verdict == "WARNING" and include
+            #   boundary_warnings in the report narrative when present.
+
+        logger.info(f"Pipeline completed: output at {output_dir}")
         return output_dir
 
     def _validate_simulator_output(self, csv_path: Path) -> None:
@@ -297,11 +433,18 @@ class PipelineOrchestrator:
         subjects: dict[str, str] = {}
         for row in rows:
             subjects[row["USUBJID"]] = row["ARM"]
-        treatment_count = sum(1 for arm in subjects.values() if arm == "Treatment")
-        placebo_count = sum(1 for arm in subjects.values() if arm == "Placebo")
+        treatment_count = sum(
+            1 for arm in subjects.values() if arm == "Treatment"
+        )
+        placebo_count = sum(
+            1 for arm in subjects.values() if arm == "Placebo"
+        )
         total = treatment_count + placebo_count
         if total != self.settings.trial.n_subjects:
-            msg = f"Expected {self.settings.trial.n_subjects} subjects, got {total}"
+            msg = (
+                f"Expected {self.settings.trial.n_subjects} subjects, "
+                f"got {total}"
+            )
             raise ValueError(msg)
 
         # Check 2:1 ratio (allow +-5 for rounding)
