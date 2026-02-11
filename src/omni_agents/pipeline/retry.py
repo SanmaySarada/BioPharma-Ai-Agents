@@ -26,6 +26,28 @@ from omni_agents.models.execution import (
     ErrorClassification,
 )
 
+# Actionable fix suggestions for each error classification (ERRH-03).
+ERROR_SUGGESTIONS: dict[ErrorClassification, str] = {
+    ErrorClassification.ENVIRONMENT_ERROR: (
+        "Fix the Docker image: ensure the required R package is installed "
+        "in docker/r-clinical/Dockerfile"
+    ),
+    ErrorClassification.STATISTICAL_ERROR: (
+        "Statistical convergence failure. This may indicate a data issue "
+        "(too few events, singular covariate matrix). Check the input data "
+        "and consider simplifying the model."
+    ),
+    ErrorClassification.CODE_BUG: "R code error -- will retry with error feedback to LLM",
+    ErrorClassification.DATA_PATH_ERROR: (
+        "File not found in Docker container. Check that volume mounts match "
+        "the file paths in the generated R code."
+    ),
+    ErrorClassification.TIMEOUT: (
+        "Execution timed out. The R code may be too complex or data too large."
+    ),
+    ErrorClassification.UNKNOWN: "Unknown error -- check stderr for details.",
+}
+
 
 class NonRetriableError(Exception):
     """Raised when an error is classified as non-retriable.
@@ -33,6 +55,7 @@ class NonRetriableError(Exception):
     Attributes:
         error_class: The classification that caused the halt.
         attempts: All execution attempts up to and including the failing one.
+        agent_name: Name of the agent that produced the error.
     """
 
     def __init__(
@@ -41,10 +64,16 @@ class NonRetriableError(Exception):
         *,
         error_class: ErrorClassification,
         attempts: list[AgentAttempt],
+        agent_name: str = "",
     ) -> None:
         self.error_class = error_class
         self.attempts = attempts
-        super().__init__(message)
+        self.agent_name = agent_name
+        formatted = (
+            f"[{agent_name}] Non-retriable error ({error_class.value}): {message}\n"
+            f"Suggested fix: {ERROR_SUGGESTIONS[error_class]}"
+        )
+        super().__init__(formatted)
 
 
 class MaxRetriesExceededError(Exception):
@@ -52,11 +81,20 @@ class MaxRetriesExceededError(Exception):
 
     Attributes:
         attempts: All execution attempts.
+        agent_name: Name of the agent that exhausted retries.
     """
 
-    def __init__(self, message: str, *, attempts: list[AgentAttempt]) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempts: list[AgentAttempt],
+        agent_name: str = "",
+    ) -> None:
         self.attempts = attempts
-        super().__init__(message)
+        self.agent_name = agent_name
+        formatted = f"[{agent_name}] Failed after {len(attempts)} attempts. Last error: {message}"
+        super().__init__(formatted)
 
 
 def classify_error(stderr: str, exit_code: int, timed_out: bool) -> ErrorClassification:
@@ -164,6 +202,7 @@ async def execute_with_retry(
     executor: Any,
     work_dir: Path,
     max_attempts: int = 3,
+    agent_name: str = "",
     input_volumes: dict[str, str] | None = None,
 ) -> tuple[str, list[AgentAttempt]]:
     """Run the generate-execute-classify-retry loop.
@@ -183,6 +222,8 @@ async def execute_with_retry(
             method returning ``DockerResult``.
         work_dir: Path to the workspace directory mounted into Docker.
         max_attempts: Maximum number of attempts (default 3, per ERRH-02).
+        agent_name: Name of the agent for error messages (default empty for
+            backward compatibility with Phase 1 code).
         input_volumes: Optional dict of additional read-only volume mounts
             ``{host_path: container_path}``.
 
@@ -194,6 +235,7 @@ async def execute_with_retry(
             (ENVIRONMENT_ERROR, STATISTICAL_ERROR).
         MaxRetriesExceededError: If all attempts are exhausted without success.
     """
+    log_prefix = f"[{agent_name}] " if agent_name else ""
     attempts: list[AgentAttempt] = []
     last_error: str | None = None
 
@@ -216,6 +258,7 @@ async def execute_with_retry(
                 docker_result=docker_result,
                 error_class=None,
                 timestamp=datetime.now(tz=UTC),
+                agent_name=agent_name,
             )
             attempts.append(attempt)
             return docker_result.stdout, attempts
@@ -231,21 +274,25 @@ async def execute_with_retry(
             docker_result=docker_result,
             error_class=error_class,
             timestamp=datetime.now(tz=UTC),
+            agent_name=agent_name,
         )
         attempts.append(attempt)
 
         # Check if retriable
         if not is_retriable(error_class):
             raise NonRetriableError(
-                f"Non-retriable error ({error_class.value}): {docker_result.stderr[:500]}",
+                docker_result.stderr[:500],
                 error_class=error_class,
                 attempts=attempts,
+                agent_name=agent_name,
             )
 
         last_error = docker_result.stderr
 
     # All attempts exhausted
+    last_stderr = attempts[-1].docker_result.stderr[:500] if attempts and attempts[-1].docker_result else "unknown"
     raise MaxRetriesExceededError(
-        f"Failed after {max_attempts} attempts",
+        last_stderr,
         attempts=attempts,
+        agent_name=agent_name,
     )

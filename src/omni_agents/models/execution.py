@@ -45,3 +45,4 @@ class AgentAttempt(BaseModel):
     docker_result: DockerResult | None = None
     error_class: ErrorClassification | None = None
     timestamp: datetime
+    agent_name: str = ""
