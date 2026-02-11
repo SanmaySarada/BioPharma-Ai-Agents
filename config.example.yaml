@@ -1,0 +1,57 @@
+# omni-ai-agents configuration
+# Copy to config.yaml and fill in API keys before running.
+
+trial:
+  # Number of subjects in the simulated trial
+  n_subjects: 300
+  # Treatment-to-placebo randomization ratio
+  randomization_ratio: "2:1"
+  # Random seed for reproducible data generation
+  seed: 12345
+  # Number of weekly visits (including baseline)
+  visits: 26
+  # Primary endpoint measure
+  endpoint: "SBP"
+  # Treatment arm SBP parameters (mmHg)
+  treatment_sbp_mean: 120.0
+  treatment_sbp_sd: 10.0
+  # Placebo arm SBP parameters (mmHg)
+  placebo_sbp_mean: 140.0
+  placebo_sbp_sd: 20.0
+  # Baseline SBP parameters (mmHg, before treatment)
+  baseline_sbp_mean: 150.0
+  baseline_sbp_sd: 10.0
+  # Demographics: age distribution
+  age_mean: 55.0
+  age_sd: 10.0
+  # Data quality: proportion of randomly missing values per visit
+  missing_rate: 0.03
+  # Data quality: proportion of subjects who drop out before Week 26
+  dropout_rate: 0.10
+
+docker:
+  # Docker image with R and clinical trial packages pre-installed
+  image: "omni-r-clinical:latest"
+  # Container memory limit
+  memory_limit: "2g"
+  # Number of CPUs allocated to the container
+  cpu_count: 1
+  # Maximum execution time in seconds before killing the container
+  timeout: 300
+  # Disable network access inside containers for isolation
+  network_disabled: true
+
+llm:
+  gemini:
+    # Set GEMINI_API_KEY environment variable (never paste key here)
+    api_key: $GEMINI_API_KEY
+    model: "gemini-2.5-pro"
+    temperature: 0.0
+  openai:
+    # Set OPENAI_API_KEY environment variable (never paste key here)
+    api_key: $OPENAI_API_KEY
+    model: "gpt-4o"
+    temperature: 0.0
+
+# Directory where pipeline outputs are written
+output_dir: "./output"
