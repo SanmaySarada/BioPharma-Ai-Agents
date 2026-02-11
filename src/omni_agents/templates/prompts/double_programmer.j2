@@ -25,11 +25,46 @@ Do NOT use any packages not in this list. Do NOT use install.packages().
 You must independently derive a time-to-event analysis from the raw data:
 
 ### Step 1: Define Events and Censoring
-- EVENT: First visit (after baseline, i.e., VISIT > 0) where SBP < {{ event_threshold }} mmHg
-- Event time = VISIT number of the first SBP < {{ event_threshold }} (in weeks)
-- CENSORED: Subject never has SBP < {{ event_threshold }}
-  - Censoring time = last VISIT with a non-NA SBP measurement
-- IMPORTANT: When checking SBP < {{ event_threshold }}, exclude NA values: use `!is.na(SBP) & SBP < {{ event_threshold }}`
+
+Use this EXACT approach (do NOT use min()/max() with na.rm=TRUE -- they return Inf/-Inf on empty vectors):
+
+```r
+# Filter to post-baseline visits only
+post_bl <- data %>% filter(VISIT > 0)
+
+# For each subject, find first event visit (NA_real_ if no event)
+event_visits <- post_bl %>%
+  filter(!is.na(SBP) & SBP < {{ event_threshold }}) %>%
+  group_by(USUBJID) %>%
+  summarize(EVENT_VISIT = min(VISIT), .groups = "drop")
+
+# For each subject, find last observed (non-NA SBP) visit (NA_real_ if all NA)
+last_obs <- post_bl %>%
+  filter(!is.na(SBP)) %>%
+  group_by(USUBJID) %>%
+  summarize(LAST_OBS_VISIT = max(VISIT), .groups = "drop")
+
+# Get baseline demographics (one row per subject)
+baseline <- data %>%
+  filter(VISIT == 0) %>%
+  select(USUBJID, ARM, AGE, SEX)
+
+# Join everything: start from ALL subjects in baseline
+analysis_data <- baseline %>%
+  left_join(event_visits, by = "USUBJID") %>%
+  left_join(last_obs, by = "USUBJID") %>%
+  mutate(
+    event_status = if_else(!is.na(EVENT_VISIT), 1L, 0L),
+    time = if_else(event_status == 1L, EVENT_VISIT, coalesce(LAST_OBS_VISIT, 0))
+  )
+# This ensures all {{ n_subjects }} subjects are in analysis_data.
+# Subjects with all-NA post-baseline SBP get censored at time=0.
+```
+
+Key rules:
+- EVENT: First post-baseline visit (VISIT > 0) where `!is.na(SBP) & SBP < {{ event_threshold }}`
+- CENSORED: No event; censoring time = last post-baseline visit with non-NA SBP, or 0 if all NA
+- All {{ n_subjects }} subjects MUST appear in analysis_data (do NOT drop any subjects)
 
 ### Step 2: Log-Rank Test
 ```r
