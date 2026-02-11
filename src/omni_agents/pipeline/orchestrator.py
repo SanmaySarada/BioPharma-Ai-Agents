@@ -32,7 +32,7 @@ from omni_agents.pipeline.retry import (
     NonRetriableError,
     execute_with_retry,
 )
-from omni_agents.pipeline.schema_validator import SchemaValidationError, SchemaValidator
+from omni_agents.pipeline.schema_validator import SchemaValidator
 from omni_agents.pipeline.script_cache import ScriptCache
 
 
@@ -193,7 +193,80 @@ class PipelineOrchestrator:
         self._validate_simulator_output(output_csv)
         logger.info("Simulator output validated")
 
-        logger.info(f"Pipeline completed: output at {output_dir}")
+        # === Step 2: SDTM Agent ===
+        sdtm_dir = output_dir / "track_a" / "sdtm"
+        sdtm_dir.mkdir(parents=True, exist_ok=True)
+
+        sdtm_agent = SDTMAgent(
+            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+        )
+        await self._run_agent(
+            agent=sdtm_agent,
+            context={
+                "input_path": "/workspace/input/SBPdata.csv",
+                "output_dir": "/workspace",
+            },
+            work_dir=sdtm_dir,
+            input_volumes={str(raw_dir): "/workspace/input"},
+            expected_inputs=["/workspace/input/SBPdata.csv"],
+            expected_outputs=["DM.csv", "VS.csv"],
+        )
+
+        # Validate SDTM output (PIPE-06)
+        SchemaValidator.validate_sdtm(sdtm_dir, self.settings.trial.n_subjects)
+        logger.info("SDTM schema validation passed")
+
+        # === Step 3: ADaM Agent ===
+        adam_dir = output_dir / "track_a" / "adam"
+        adam_dir.mkdir(parents=True, exist_ok=True)
+
+        adam_agent = ADaMAgent(
+            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+        )
+        await self._run_agent(
+            agent=adam_agent,
+            context={
+                "input_dir": "/workspace/input",
+                "output_dir": "/workspace",
+            },
+            work_dir=adam_dir,
+            input_volumes={str(sdtm_dir): "/workspace/input"},
+            expected_inputs=["DM.csv", "VS.csv"],
+            expected_outputs=["ADTTE.rds", "ADTTE_summary.json"],
+        )
+
+        # Validate ADaM output (PIPE-06)
+        SchemaValidator.validate_adam(adam_dir, self.settings.trial.n_subjects)
+        logger.info("ADaM schema validation passed")
+
+        # === Step 4: Stats Agent ===
+        stats_dir = output_dir / "track_a" / "stats"
+        stats_dir.mkdir(parents=True, exist_ok=True)
+
+        stats_agent = StatsAgent(
+            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+        )
+        await self._run_agent(
+            agent=stats_agent,
+            context={
+                "adam_dir": "/workspace/adam",
+                "sdtm_dir": "/workspace/sdtm",
+                "output_dir": "/workspace",
+            },
+            work_dir=stats_dir,
+            input_volumes={
+                str(adam_dir): "/workspace/adam",
+                str(sdtm_dir): "/workspace/sdtm",
+            },
+            expected_inputs=["ADTTE.rds", "DM.csv"],
+            expected_outputs=["results.json", "km_plot.png"],
+        )
+
+        # Validate Stats output (PIPE-06)
+        SchemaValidator.validate_stats(stats_dir)
+        logger.info("Stats schema validation passed")
+
+        logger.info(f"Track A pipeline completed: output at {output_dir}")
         return output_dir
 
     def _validate_simulator_output(self, csv_path: Path) -> None:
