@@ -143,13 +143,13 @@ def classify_error(stderr: str, exit_code: int, timed_out: bool) -> ErrorClassif
         "convergence",
         "not positive definite",
         "infinite or missing values",
-        "na/nan/inf in foreign function call",
     ]
     if any(p in stderr_lower for p in stat_patterns):
         return ErrorClassification.STATISTICAL_ERROR
 
     # Code bugs -- retriable (syntax errors, object not found, etc.)
     code_patterns = [
+        "na/nan/inf in foreign function call",  # NA values passed to C code -- LLM needs to add NA filtering
         "object",  # "object 'x' not found"
         "unexpected",  # "unexpected symbol"
         "error in",  # Generic R errors
