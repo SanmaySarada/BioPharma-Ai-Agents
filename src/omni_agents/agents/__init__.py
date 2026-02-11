@@ -4,5 +4,6 @@ from omni_agents.agents.adam import ADaMAgent
 from omni_agents.agents.base import BaseAgent
 from omni_agents.agents.sdtm import SDTMAgent
 from omni_agents.agents.simulator import SimulatorAgent
+from omni_agents.agents.stats import StatsAgent
 
-__all__ = ["ADaMAgent", "BaseAgent", "SDTMAgent", "SimulatorAgent"]
+__all__ = ["ADaMAgent", "BaseAgent", "SDTMAgent", "SimulatorAgent", "StatsAgent"]
