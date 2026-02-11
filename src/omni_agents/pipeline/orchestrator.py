@@ -1,8 +1,9 @@
 """Pipeline orchestrator wiring agents to Docker execution.
 
-Runs the full pipeline: Simulator -> fork(Track A, Track B) -> ConsensusJudge,
-with schema validation gates and pre-execution R code checks between each
-agent handoff.  Track A uses Gemini; Track B uses GPT-4 for model diversity.
+Runs the full pipeline: Simulator -> fork(Track A, Track B) -> ConsensusJudge
+-> Medical Writer, with schema validation gates and pre-execution R code checks
+between each agent handoff.  Track A uses Gemini; Track B uses GPT-4 for model
+diversity.
 """
 
 import asyncio
@@ -17,6 +18,7 @@ from loguru import logger
 from omni_agents.agents.adam import ADaMAgent
 from omni_agents.agents.base import BaseAgent
 from omni_agents.agents.double_programmer import DoubleProgrammerAgent
+from omni_agents.agents.medical_writer import MedicalWriterAgent
 from omni_agents.agents.sdtm import SDTMAgent
 from omni_agents.agents.simulator import SimulatorAgent
 from omni_agents.agents.stats import StatsAgent
@@ -51,7 +53,8 @@ class PipelineOrchestrator:
     Track A (Gemini: SDTM -> ADaM -> Stats) and Track B (GPT-4: independent
     validation) in parallel via ``asyncio.gather()``.  After both tracks
     complete, the ConsensusJudge compares results and the pipeline proceeds
-    (PASS/WARNING) or halts (HALT).
+    (PASS/WARNING) or halts (HALT).  On PASS/WARNING, the Medical Writer
+    generates a Clinical Study Report (.docx) from stats output and verdict.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -374,7 +377,7 @@ class PipelineOrchestrator:
     async def run(self) -> Path:
         """Execute the full pipeline with parallel tracks and consensus gate.
 
-        Flow: Simulator -> fork(Track A, Track B) -> ConsensusJudge.
+        Flow: Simulator -> fork(Track A, Track B) -> ConsensusJudge -> Medical Writer.
 
         Returns:
             Path to the run output directory.
@@ -507,6 +510,38 @@ class PipelineOrchestrator:
             #   Key: comparisons (list of per-metric comparison objects)
             #   Phase 4 should check verdict == "WARNING" and include
             #   boundary_warnings in the report narrative when present.
+
+        # === Step 4: Medical Writer (CSR generation) ===
+        csr_dir = output_dir / "csr"
+        csr_dir.mkdir(parents=True, exist_ok=True)
+
+        stats_dir = output_dir / "track_a" / "stats"
+
+        writer_agent = MedicalWriterAgent(
+            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+        )
+        _stdout, writer_attempts = await self._run_agent(
+            agent=writer_agent,
+            context={
+                "results_path": "/workspace/stats/results.json",
+                "verdict_path": "/workspace/consensus/verdict.json",
+                "table1_path": "/workspace/stats/table1_demographics.csv",
+                "table2_path": "/workspace/stats/table2_km_results.csv",
+                "table3_path": "/workspace/stats/table3_cox_results.csv",
+                "km_plot_path": "/workspace/stats/km_plot.png",
+                "output_dir": "/workspace",
+            },
+            work_dir=csr_dir,
+            input_volumes={
+                str(stats_dir): "/workspace/stats",
+                str(consensus_dir): "/workspace/consensus",
+            },
+            expected_outputs=["clinical_study_report.docx"],
+        )
+        self._record_step(
+            state, state_path, "medical_writer", "MedicalWriterAgent",
+            "shared", writer_attempts,
+        )
 
         state.status = "completed"
         state.save(state_path)
