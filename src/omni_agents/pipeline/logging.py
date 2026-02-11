@@ -3,6 +3,8 @@
 Provides dual-sink logging via loguru:
 
 - **Console sink**: Human-readable, colorized, shows agent name and step.
+  When a shared Rich ``Console`` is provided, output routes through it to
+  avoid corrupting the Rich Live display.
 - **File sink**: JSON-structured JSONL written to ``{log_dir}/{run_id}/pipeline.jsonl``
   for programmatic parsing and audit trails.
 
@@ -10,48 +12,85 @@ Per PITFALLS.md ERRH-04: all attempts (including failures) must be logged
 with generated code, error output, and error classification.
 """
 
+from __future__ import annotations
+
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from omni_agents.models.execution import AgentAttempt
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from rich.console import Console
+
+    from omni_agents.models.execution import AgentAttempt
+
+# Module-level shared console reference for Rich-based console sink.
+_console: Console | None = None
 
 
-def setup_logging(log_dir: Path, run_id: str) -> None:
+def setup_logging(
+    log_dir: Path,
+    run_id: str,
+    console: Console | None = None,
+) -> None:
     """Configure loguru sinks for pipeline execution.
 
-    Sets up two sinks:
-    1. Console (stderr): human-readable format with agent context.
-    2. File: JSON-structured JSONL at ``{log_dir}/{run_id}/pipeline.jsonl``.
+    Sets up console and file sinks:
+
+    - If *console* is provided, a single console sink writes through the
+      shared Rich ``Console`` (prevents Live display corruption).
+    - If *console* is ``None`` (backward compat), two ``sys.stderr`` sinks
+      are configured: one for agent-contextualized logs, one for plain logs.
+    - A JSON-structured JSONL file sink is always created.
 
     Removes all existing handlers first to avoid duplicate output.
 
     Args:
         log_dir: Root directory for log storage.
         run_id: Unique identifier for this pipeline run.
+        console: Optional shared Rich Console for output routing.
     """
+    global _console  # noqa: PLW0603
+    _console = console
+
     # Remove default handler
     logger.remove()
 
-    # Console: human-readable with agent context
-    logger.add(
-        sys.stderr,
-        format=(
-            "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level>"
-            " | <cyan>{extra[agent]}</cyan> | {message}"
-        ),
-        level="INFO",
-        filter=lambda record: "agent" in record["extra"],
-    )
+    if console is not None:
+        # Route ALL console output through the shared Rich Console so loguru
+        # does not write directly to stderr (which would corrupt Live display).
+        logger.add(
+            lambda msg: console.print(msg, end="", highlight=False, markup=False),
+            format="{time:HH:mm:ss} | {level: <8} | {message}",
+            level="INFO",
+            colorize=False,
+        )
+    else:
+        # Legacy mode: two stderr sinks (agent-context and default).
 
-    # Console: default handler for non-agent logs
-    logger.add(
-        sys.stderr,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
-        level="INFO",
-        filter=lambda record: "agent" not in record["extra"],
-    )
+        # Console: human-readable with agent context
+        logger.add(
+            sys.stderr,
+            format=(
+                "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level>"
+                " | <cyan>{extra[agent]}</cyan> | {message}"
+            ),
+            level="INFO",
+            filter=lambda record: "agent" in record["extra"],
+        )
+
+        # Console: default handler for non-agent logs
+        logger.add(
+            sys.stderr,
+            format=(
+                "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level>"
+                " | {message}"
+            ),
+            level="INFO",
+            filter=lambda record: "agent" not in record["extra"],
+        )
 
     # File: JSON structured
     log_file = log_dir / run_id / "pipeline.jsonl"
@@ -127,3 +166,29 @@ def log_agent_complete(agent_name: str, total_attempts: int, *, success: bool) -
                 "Agent failed after {attempts} attempt(s)",
                 attempts=total_attempts,
             )
+
+
+def log_llm_call(
+    agent_name: str,
+    model: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+) -> None:
+    """Log an LLM API call with token counts.
+
+    Ensures token counts appear in both the JSONL file sink (structured)
+    and the console sink (human-readable).
+
+    Args:
+        agent_name: Name of the agent that made the LLM call.
+        model: Model identifier (e.g. ``"gemini-2.0-flash"``).
+        input_tokens: Prompt token count, if available.
+        output_tokens: Completion token count, if available.
+    """
+    with logger.contextualize(agent=agent_name):
+        logger.info(
+            "LLM call: model={model} input_tokens={input_tokens} output_tokens={output_tokens}",
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
