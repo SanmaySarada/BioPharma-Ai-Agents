@@ -15,6 +15,7 @@ Per PITFALLS.md ERRH-02: max 3 retries, classify before retry.
 Per PITFALLS.md ERRH-07: don't waste LLM calls on non-retriable errors.
 """
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
@@ -235,7 +236,6 @@ async def execute_with_retry(
             (ENVIRONMENT_ERROR, STATISTICAL_ERROR).
         MaxRetriesExceededError: If all attempts are exhausted without success.
     """
-    log_prefix = f"[{agent_name}] " if agent_name else ""
     attempts: list[AgentAttempt] = []
     last_error: str | None = None
 
@@ -244,7 +244,9 @@ async def execute_with_retry(
         code = await generate_code_fn(last_error, attempt_num)
 
         # Execute in Docker
-        docker_result: DockerResult = executor.execute(code, work_dir, input_volumes)
+        docker_result: DockerResult = await asyncio.to_thread(
+            executor.execute, code, work_dir, input_volumes
+        )
 
         # Check for success: exit_code == 0, not timed out, no real errors in stderr
         if (
@@ -290,7 +292,11 @@ async def execute_with_retry(
         last_error = docker_result.stderr
 
     # All attempts exhausted
-    last_stderr = attempts[-1].docker_result.stderr[:500] if attempts and attempts[-1].docker_result else "unknown"
+    last_stderr = (
+        attempts[-1].docker_result.stderr[:500]
+        if attempts and attempts[-1].docker_result
+        else "unknown"
+    )
     raise MaxRetriesExceededError(
         last_stderr,
         attempts=attempts,
