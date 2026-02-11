@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
+from rich.console import Console
 
 from omni_agents.agents.adam import ADaMAgent
 from omni_agents.agents.base import BaseAgent
@@ -23,6 +24,7 @@ from omni_agents.agents.sdtm import SDTMAgent
 from omni_agents.agents.simulator import SimulatorAgent
 from omni_agents.agents.stats import StatsAgent
 from omni_agents.config import Settings
+from omni_agents.display.callbacks import ProgressCallback
 from omni_agents.docker.engine import DockerEngine
 from omni_agents.docker.r_executor import RExecutor
 from omni_agents.llm.gemini import GeminiAdapter
@@ -34,6 +36,7 @@ from omni_agents.pipeline.logging import (
     log_agent_complete,
     log_agent_start,
     log_attempt,
+    log_llm_call,
     setup_logging,
 )
 from omni_agents.pipeline.pre_execution import PreExecutionError, check_r_code
@@ -57,8 +60,15 @@ class PipelineOrchestrator:
     generates a Clinical Study Report (.docx) from stats output and verdict.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        callback: ProgressCallback | None = None,
+        console: Console | None = None,
+    ) -> None:
         self.settings = settings
+        self.callback = callback
+        self.console = console
         self.engine = DockerEngine()
         self.executor = RExecutor(
             engine=self.engine,
@@ -105,6 +115,10 @@ class PipelineOrchestrator:
         async def generate_code(
             previous_error: str | None, attempt: int
         ) -> str:
+            # Fire retry callback when re-generating code after a failure
+            if attempt > 1 and previous_error and self.callback:
+                self.callback.on_step_retry(agent.name, attempt, 3, previous_error[:200])
+
             # On first attempt, try cache
             if attempt == 1 and previous_error is None:
                 cached = self.script_cache.get(cache_key)
@@ -117,8 +131,17 @@ class PipelineOrchestrator:
             if previous_error:
                 ctx = agent.make_retry_context(ctx, previous_error, attempt)
 
-            code, _response = await agent.generate_code(ctx)
+            code, response = await agent.generate_code(ctx)
             code = agent.inject_seed(code, self.settings.trial.seed)
+
+            # Log LLM token counts (CLI-05)
+            log_llm_call(
+                agent.name, response.model, response.input_tokens, response.output_tokens,
+            )
+            if self.callback:
+                self.callback.on_llm_call(
+                    agent.name, response.model, response.input_tokens, response.output_tokens,
+                )
 
             # Pre-execution validation (ERRH-05)
             if expected_inputs or expected_outputs:
@@ -154,6 +177,15 @@ class PipelineOrchestrator:
             for attempt in e.attempts:
                 log_attempt(agent.name, attempt)
             logger.error(f"{agent.name} failed: {e}")
+            if self.callback:
+                error_class = (
+                    e.error_class.value
+                    if isinstance(e, NonRetriableError)
+                    else "max_retries_exceeded"
+                )
+                self.callback.on_step_fail(
+                    agent.name, error_class, str(e)[:500], "Check logs for details",
+                )
             raise
 
         for attempt in attempts:
@@ -236,6 +268,9 @@ class PipelineOrchestrator:
         sdtm_agent = SDTMAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
+        if self.callback:
+            self.callback.on_step_start("sdtm", "SDTMAgent", "track_a")
+        t0 = time.monotonic()
         _stdout, sdtm_attempts = await self._run_agent(
             agent=sdtm_agent,
             context={
@@ -247,9 +282,12 @@ class PipelineOrchestrator:
             expected_inputs=["/workspace/input/SBPdata.csv"],
             expected_outputs=["DM.csv", "VS.csv"],
         )
+        duration = time.monotonic() - t0
         self._record_step(
             state, state_path, "sdtm", "SDTMAgent", "track_a", sdtm_attempts
         )
+        if self.callback:
+            self.callback.on_step_complete("sdtm", duration, len(sdtm_attempts))
 
         # Validate SDTM output (PIPE-06)
         SchemaValidator.validate_sdtm(sdtm_dir, self.settings.trial.n_subjects)
@@ -262,6 +300,9 @@ class PipelineOrchestrator:
         adam_agent = ADaMAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
+        if self.callback:
+            self.callback.on_step_start("adam", "ADaMAgent", "track_a")
+        t0 = time.monotonic()
         _stdout, adam_attempts = await self._run_agent(
             agent=adam_agent,
             context={
@@ -273,9 +314,12 @@ class PipelineOrchestrator:
             expected_inputs=["DM.csv", "VS.csv"],
             expected_outputs=["ADTTE.rds", "ADTTE_summary.json"],
         )
+        duration = time.monotonic() - t0
         self._record_step(
             state, state_path, "adam", "ADaMAgent", "track_a", adam_attempts
         )
+        if self.callback:
+            self.callback.on_step_complete("adam", duration, len(adam_attempts))
 
         # Validate ADaM output (PIPE-06)
         SchemaValidator.validate_adam(adam_dir, self.settings.trial.n_subjects)
@@ -288,6 +332,9 @@ class PipelineOrchestrator:
         stats_agent = StatsAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
+        if self.callback:
+            self.callback.on_step_start("stats", "StatsAgent", "track_a")
+        t0 = time.monotonic()
         _stdout, stats_attempts = await self._run_agent(
             agent=stats_agent,
             context={
@@ -303,9 +350,12 @@ class PipelineOrchestrator:
             expected_inputs=["ADTTE.rds", "DM.csv"],
             expected_outputs=["results.json", "km_plot.png"],
         )
+        duration = time.monotonic() - t0
         self._record_step(
             state, state_path, "stats", "StatsAgent", "track_a", stats_attempts
         )
+        if self.callback:
+            self.callback.on_step_complete("stats", duration, len(stats_attempts))
 
         # Validate Stats output (PIPE-06)
         SchemaValidator.validate_stats(stats_dir)
@@ -346,6 +396,9 @@ class PipelineOrchestrator:
             prompt_dir=prompt_dir,
             trial_config=self.settings.trial,
         )
+        if self.callback:
+            self.callback.on_step_start("double_programmer", "DoubleProgrammerAgent", "track_b")
+        t0 = time.monotonic()
         _stdout, dp_attempts = await self._run_agent(
             agent=agent,
             context={
@@ -359,6 +412,7 @@ class PipelineOrchestrator:
             expected_inputs=["/workspace/input/SBPdata.csv"],
             expected_outputs=["validation.json"],
         )
+        duration = time.monotonic() - t0
         self._record_step(
             state,
             state_path,
@@ -367,6 +421,8 @@ class PipelineOrchestrator:
             "track_b",
             dp_attempts,
         )
+        if self.callback:
+            self.callback.on_step_complete("double_programmer", duration, len(dp_attempts))
 
         # Validate Track B output (PIPE-06 for Track B)
         SchemaValidator.validate_track_b(track_b_dir)
@@ -382,6 +438,8 @@ class PipelineOrchestrator:
         Returns:
             Path to the run output directory.
         """
+        pipeline_start = time.monotonic()
+
         # 1. Create run directory with timestamp
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.settings.output_dir) / run_id
@@ -390,8 +448,8 @@ class PipelineOrchestrator:
         logs_dir = output_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
-        # 2. Setup logging
-        setup_logging(logs_dir, run_id)
+        # 2. Setup logging (route through shared Rich Console if provided)
+        setup_logging(logs_dir, run_id, console=self.console)
         logger.info(f"Pipeline started: run_id={run_id}")
 
         # Initialize pipeline state (PIPE-05)
@@ -416,15 +474,21 @@ class PipelineOrchestrator:
         simulator = SimulatorAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
+        if self.callback:
+            self.callback.on_step_start("simulator", "SimulatorAgent", "shared")
+        t0 = time.monotonic()
         _stdout, sim_attempts = await self._run_agent(
             agent=simulator,
             context={"output_path": "/workspace/SBPdata.csv"},
             work_dir=raw_dir,
             expected_outputs=["SBPdata.csv"],
         )
+        duration = time.monotonic() - t0
         self._record_step(
             state, state_path, "simulator", "SimulatorAgent", "shared", sim_attempts
         )
+        if self.callback:
+            self.callback.on_step_complete("simulator", duration, len(sim_attempts))
 
         # Validate Simulator output (existing validation)
         output_csv = raw_dir / "SBPdata.csv"
@@ -456,6 +520,9 @@ class PipelineOrchestrator:
         consensus_dir.mkdir(parents=True, exist_ok=True)
 
         # Run consensus comparison
+        if self.callback:
+            self.callback.on_step_start("consensus", "ConsensusJudge", "shared")
+        t0 = time.monotonic()
         verdict = ConsensusJudge.compare(track_a_result, track_b_result)
 
         # Save verdict to consensus directory
@@ -464,6 +531,7 @@ class PipelineOrchestrator:
         logger.info(f"Consensus verdict: {verdict.verdict.value}")
 
         # Record consensus step
+        duration = time.monotonic() - t0
         state.steps["consensus"] = StepState(
             name="consensus",
             agent_type="ConsensusJudge",
@@ -480,6 +548,8 @@ class PipelineOrchestrator:
         )
         state.current_step = "consensus"
         state.save(state_path)
+        if self.callback:
+            self.callback.on_step_complete("consensus", duration, 1)
 
         # Handle verdict (PIPE-04)
         if verdict.verdict == Verdict.HALT:
@@ -520,6 +590,9 @@ class PipelineOrchestrator:
         writer_agent = MedicalWriterAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
+        if self.callback:
+            self.callback.on_step_start("medical_writer", "MedicalWriterAgent", "shared")
+        t0 = time.monotonic()
         _stdout, writer_attempts = await self._run_agent(
             agent=writer_agent,
             context={
@@ -538,15 +611,22 @@ class PipelineOrchestrator:
             },
             expected_outputs=["clinical_study_report.docx"],
         )
+        duration = time.monotonic() - t0
         self._record_step(
             state, state_path, "medical_writer", "MedicalWriterAgent",
             "shared", writer_attempts,
         )
+        if self.callback:
+            self.callback.on_step_complete("medical_writer", duration, len(writer_attempts))
 
         state.status = "completed"
         state.save(state_path)
 
         logger.info(f"Pipeline completed: output at {output_dir}")
+
+        if self.callback:
+            self.callback.on_pipeline_complete(str(output_dir), time.monotonic() - pipeline_start)
+
         return output_dir
 
     def _validate_simulator_output(self, csv_path: Path) -> None:
