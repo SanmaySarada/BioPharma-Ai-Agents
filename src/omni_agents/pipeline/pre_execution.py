@@ -12,6 +12,7 @@ ALLOWED_PACKAGES: frozenset[str] = frozenset({
     "survival", "survminer", "tidyverse", "haven", "jsonlite",
     "readr", "ggplot2", "broom", "tableone", "dplyr", "tidyr",
     "stringr", "purrr", "tibble", "forcats", "lubridate",
+    "officer", "flextable",
 })
 
 # Regex patterns for R library/require calls

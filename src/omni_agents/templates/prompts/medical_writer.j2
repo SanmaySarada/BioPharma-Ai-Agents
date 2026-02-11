@@ -26,16 +26,19 @@ All input paths are provided in the user prompt. The inputs are:
 ### table1_demographics.csv -- Demographics Summary
 - Pre-formatted tableone output with Overall, Placebo, Treatment columns
 - Use check.names = FALSE when reading (column names contain special characters)
-- Pass directly to flextable -- no column filtering needed
+- The first column contains row names (unnamed header ""); read with row.names = NULL and rename the first column to "Characteristic"
+- Pass directly to flextable -- no column filtering needed (but remove the "p" and "test" columns if present)
 
 ### table2_km_results.csv -- Kaplan-Meier Results
 - Contains both display columns (*_display) and unrounded columns (*_unrounded)
-- Select ONLY display columns for the flextable: stratum, median_display, lcl_display, ucl_display
+- The stratum column is named "strata" (NOT "stratum")
+- Select ONLY display columns for the flextable: strata, median_display, lcl_display, ucl_display
 - Rename headers for publication quality
 
 ### table3_cox_results.csv -- Cox Proportional Hazards Results
 - Contains both display columns (*_display) and unrounded columns (*_unrounded)
-- Select ONLY display columns for the flextable: term, hr_display, conf_low_display, conf_high_display, p_value_display
+- Column names are: term, hr_display, ci_lower_display, ci_upper_display, p_value_display (NOT conf_low/conf_high)
+- Select ONLY display columns for the flextable: term, hr_display, ci_lower_display, ci_upper_display, p_value_display
 - Rename headers for publication quality
 
 ### km_plot.png -- Kaplan-Meier Survival Curve
@@ -108,7 +111,11 @@ If verdict is "PASS", skip this section entirely.
 ```r
 doc <- body_add_par(doc, "Table 1: Demographics by Treatment Arm", style = "heading 2")
 doc <- body_bookmark(doc, "bkm_table1")
-tab1 <- read.csv("TABLE1_PATH", check.names = FALSE)
+tab1 <- read.csv("TABLE1_PATH", check.names = FALSE, row.names = NULL)
+# The first column is unnamed row names from tableone -- rename it
+colnames(tab1)[1] <- "Characteristic"
+# Remove internal columns (p-value, test) that are not for the CSR
+tab1 <- tab1[, !(colnames(tab1) %in% c("p", "test"))]
 ft1 <- flextable(tab1)
 ft1 <- theme_vanilla(ft1)
 ft1 <- autofit(ft1)
@@ -121,10 +128,10 @@ doc <- body_add_flextable(doc, ft1)
 doc <- body_add_par(doc, "Table 2: Kaplan-Meier Survival Analysis", style = "heading 2")
 doc <- body_bookmark(doc, "bkm_table2")
 tab2 <- read.csv("TABLE2_PATH")
-tab2_display <- tab2[, c("stratum", "median_display", "lcl_display", "ucl_display")]
+tab2_display <- tab2[, c("strata", "median_display", "lcl_display", "ucl_display")]
 ft2 <- flextable(tab2_display)
 ft2 <- set_header_labels(ft2,
-  stratum = "Stratum",
+  strata = "Stratum",
   median_display = "Median (weeks)",
   lcl_display = "95% LCL",
   ucl_display = "95% UCL")
@@ -139,13 +146,13 @@ doc <- body_add_flextable(doc, ft2)
 doc <- body_add_par(doc, "Table 3: Cox Proportional Hazards Model", style = "heading 2")
 doc <- body_bookmark(doc, "bkm_table3")
 tab3 <- read.csv("TABLE3_PATH")
-tab3_display <- tab3[, c("term", "hr_display", "conf_low_display", "conf_high_display", "p_value_display")]
+tab3_display <- tab3[, c("term", "hr_display", "ci_lower_display", "ci_upper_display", "p_value_display")]
 ft3 <- flextable(tab3_display)
 ft3 <- set_header_labels(ft3,
   term = "Term",
   hr_display = "Hazard Ratio",
-  conf_low_display = "95% LCL",
-  conf_high_display = "95% UCL",
+  ci_lower_display = "95% LCL",
+  ci_upper_display = "95% UCL",
   p_value_display = "P-value")
 ft3 <- theme_vanilla(ft3)
 ft3 <- autofit(ft3)
@@ -226,7 +233,7 @@ Use `print(doc, target = ...)` -- this is the officer method for saving a docx o
 
 6. **DATA DICTIONARY (CSR-04)**: Include the data dictionary section with ADTTE variable derivations as specified above. This is required regulatory content explaining how analysis variables were derived from source data.
 
-7. **TABLE1 CSV**: Use check.names = FALSE when reading table1_demographics.csv because tableone output has column names with special characters (parentheses, percentages).
+7. **TABLE1 CSV**: Use check.names = FALSE and row.names = NULL when reading table1_demographics.csv. The first column is unnamed row names from tableone -- rename it to "Characteristic". Remove the "p" and "test" columns before passing to flextable.
 
 ## Important Notes
 
