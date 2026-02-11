@@ -4,6 +4,9 @@ import asyncio
 from pathlib import Path
 
 import typer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = typer.Typer(
     name="omni-agents",
