@@ -26,6 +26,7 @@ from omni_agents.pipeline.retry import (
     NonRetriableError,
     execute_with_retry,
 )
+from omni_agents.pipeline.script_cache import ScriptCache
 
 
 class PipelineOrchestrator:
@@ -45,6 +46,9 @@ class PipelineOrchestrator:
             cpu_count=settings.docker.cpu_count,
             timeout=settings.docker.timeout,
             network_disabled=settings.docker.network_disabled,
+        )
+        self.script_cache = ScriptCache(
+            cache_dir=Path(self.settings.output_dir) / ".script_cache"
         )
 
     async def run(self) -> Path:
@@ -77,9 +81,19 @@ class PipelineOrchestrator:
         )
 
         # 5. Define the code generation function for retry loop
+        cache_key = ScriptCache.cache_key(self.settings.trial, "simulator")
+
         async def generate_simulator_code(
             previous_error: str | None, attempt: int
         ) -> str:
+            # On first attempt, try cache for reproducibility
+            if attempt == 1 and previous_error is None:
+                cached = self.script_cache.get(cache_key)
+                if cached is not None:
+                    log_agent_start(simulator.name)
+                    logger.info("Using cached R script for reproducibility")
+                    return cached
+
             context: dict = {"output_path": "/workspace/SBPdata.csv"}
             if previous_error:
                 context = simulator.make_retry_context(context, previous_error, attempt)
@@ -87,8 +101,11 @@ class PipelineOrchestrator:
             code, _response = await simulator.generate_code(context)
             # Inject set.seed() -- orchestrator responsibility, not LLM's
             code = simulator.inject_seed(code, self.settings.trial.seed)
-            if attempt == 1:
+
+            if attempt == 1 and previous_error is None:
                 log_agent_start(simulator.name)
+                # Cache the script for future reproducible runs
+                self.script_cache.put(cache_key, code)
             return code
 
         # 6. Execute with retry
