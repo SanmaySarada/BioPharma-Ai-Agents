@@ -60,12 +60,29 @@ class LLMConfig(BaseModel):
     openai: OpenAIConfig
 
 
+class ResolutionConfig(BaseModel):
+    """Configuration for the adversarial resolution loop.
+
+    Controls whether the resolution loop activates when stage comparison
+    detects disagreements between tracks, and the maximum number of
+    resolution iterations to attempt.
+
+    Attributes:
+        enabled: Whether to attempt resolution on disagreement.
+        max_iterations: Maximum resolution retry iterations.
+    """
+
+    enabled: bool = True
+    max_iterations: int = 2
+
+
 class Settings(BaseModel):
     """Root configuration model for the omni-agents pipeline."""
 
     trial: TrialConfig = TrialConfig()
     docker: DockerConfig = DockerConfig()
     llm: LLMConfig
+    resolution: ResolutionConfig = ResolutionConfig()
     output_dir: str = "./output"
 
     @classmethod
