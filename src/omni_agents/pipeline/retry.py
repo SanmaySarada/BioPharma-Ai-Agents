@@ -16,6 +16,7 @@ Per PITFALLS.md ERRH-07: don't waste LLM calls on non-retriable errors.
 """
 
 import asyncio
+import re
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ from omni_agents.models.execution import (
     DockerResult,
     ErrorClassification,
 )
+from omni_agents.pipeline.stderr_filter import filter_r_stderr
 
 # Actionable fix suggestions for each error classification (ERRH-03).
 ERROR_SUGGESTIONS: dict[ErrorClassification, str] = {
@@ -98,6 +100,30 @@ class MaxRetriesExceededError(Exception):
         super().__init__(formatted)
 
 
+# Code bugs -- retriable (syntax errors, object not found, etc.)
+# FIXED: Use regex for patterns needing word boundaries/context (ERRCLASS-01, ERRCLASS-02).
+# These patterns search against raw stderr; each regex handles its own case sensitivity.
+_CODE_BUG_REGEX: list[re.Pattern[str]] = [
+    re.compile(r"object\s+'[^']+'\s+not found", re.IGNORECASE),
+    re.compile(r"object\s+\S+\s+not found", re.IGNORECASE),
+    re.compile(r"could not find function", re.IGNORECASE),
+    re.compile(r"^Error in ", re.MULTILINE),
+]
+
+# Safe substring patterns (no false-positive risk on R package noise).
+# Checked against lowercased stderr.
+_CODE_BUG_SUBSTRINGS: list[str] = [
+    "na/nan/inf in foreign function call",
+    "unexpected symbol",
+    "unexpected string",
+    "unexpected '",
+    "subscript out of bounds",
+    "non-numeric argument",
+    "replacement has",
+    "arguments imply differing number of rows",
+]
+
+
 def classify_error(stderr: str, exit_code: int, timed_out: bool) -> ErrorClassification:
     """Classify an R execution error for retry decision.
 
@@ -148,18 +174,10 @@ def classify_error(stderr: str, exit_code: int, timed_out: bool) -> ErrorClassif
         return ErrorClassification.STATISTICAL_ERROR
 
     # Code bugs -- retriable (syntax errors, object not found, etc.)
-    code_patterns = [
-        "na/nan/inf in foreign function call",  # NA values passed to C code -- LLM needs to add NA filtering
-        "object",  # "object 'x' not found"
-        "unexpected",  # "unexpected symbol"
-        "error in",  # Generic R errors
-        "could not find",  # Could be function or object
-        "subscript out of bounds",
-        "non-numeric argument",
-        "replacement has",
-        "arguments imply differing number of rows",
-    ]
-    if any(p in stderr_lower for p in code_patterns):
+    # FIXED: context-aware regex + safe substrings (ERRCLASS-01, ERRCLASS-02, ERRCLASS-03)
+    if any(p.search(stderr) for p in _CODE_BUG_REGEX):
+        return ErrorClassification.CODE_BUG
+    if any(p in stderr_lower for p in _CODE_BUG_SUBSTRINGS):
         return ErrorClassification.CODE_BUG
 
     return ErrorClassification.UNKNOWN
@@ -246,6 +264,16 @@ async def execute_with_retry(
         # Execute in Docker
         docker_result: DockerResult = await asyncio.to_thread(
             executor.execute, code, work_dir, input_volumes
+        )
+
+        # Filter R package loading noise before any stderr consumption (STDERR-03).
+        # Creates a new DockerResult since Pydantic models are immutable.
+        docker_result = DockerResult(
+            exit_code=docker_result.exit_code,
+            stdout=docker_result.stdout,
+            stderr=filter_r_stderr(docker_result.stderr),
+            duration_seconds=docker_result.duration_seconds,
+            timed_out=docker_result.timed_out,
         )
 
         # Check for success: exit_code == 0, not timed out, no real errors in stderr
