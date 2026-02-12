@@ -51,3 +51,17 @@ class TestScriptCache:
         assert expected_path.exists()
         assert expected_path == returned_path
         assert expected_path.read_text() == code
+
+    def test_cache_key_differs_on_track_id(self):
+        """Same config + agent but different track_id produces different keys."""
+        config = TrialConfig()
+        key_a = ScriptCache.cache_key(config, "sdtm", "track_a")
+        key_b = ScriptCache.cache_key(config, "sdtm", "track_b")
+        assert key_a != key_b
+
+    def test_cache_key_backward_compat(self):
+        """Omitting track_id produces same key as before (empty string default)."""
+        config = TrialConfig()
+        key_no_track = ScriptCache.cache_key(config, "simulator")
+        key_empty_track = ScriptCache.cache_key(config, "simulator", "")
+        assert key_no_track == key_empty_track
