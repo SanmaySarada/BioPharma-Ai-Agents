@@ -1,10 +1,17 @@
 """Double Programmer agent (Agent 2B): independent statistical validation via GPT-4.
 
+.. deprecated:: Phase 1 Symmetric Double Programming
+    This agent is deprecated. Both tracks now use SDTMAgent, ADaMAgent, and
+    StatsAgent independently. The DoubleProgrammerAgent produced a simplified
+    validation.json instead of the full SDTM -> ADaM -> Stats pipeline.
+    Kept for backward compatibility.
+
 Reads ONLY raw SBPdata.csv (not SDTM, ADaM, or Track A outputs).
 Produces validation.json with independently calculated statistics
 and structural metadata for consensus comparison.
 """
 
+import warnings
 from pathlib import Path
 
 from omni_agents.agents.base import BaseAgent
@@ -15,6 +22,11 @@ from omni_agents.llm.base import BaseLLM, LLMResponse
 class DoubleProgrammerAgent(BaseAgent):
     """Agent 2B: Independent statistical validation via GPT-4.
 
+    .. deprecated:: Phase 1 Symmetric Double Programming
+        Both tracks now use SDTMAgent, ADaMAgent, and StatsAgent independently.
+        This agent produced a simplified validation.json instead of the full
+        SDTM -> ADaM -> Stats pipeline. Kept for backward compatibility.
+
     Reads ONLY raw SBPdata.csv (not SDTM, ADaM, or Track A outputs).
     Produces validation.json with independently calculated statistics
     and structural metadata.
@@ -23,6 +35,13 @@ class DoubleProgrammerAgent(BaseAgent):
     def __init__(
         self, llm: BaseLLM, prompt_dir: Path, trial_config: TrialConfig
     ) -> None:
+        warnings.warn(
+            "DoubleProgrammerAgent is deprecated. Both tracks now run the full "
+            "SDTM -> ADaM -> Stats pipeline independently using SDTMAgent, "
+            "ADaMAgent, and StatsAgent.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(llm, prompt_dir)
         self.trial_config = trial_config
 
