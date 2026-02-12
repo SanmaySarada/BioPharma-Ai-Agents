@@ -21,8 +21,9 @@ Update PipelineDisplay for the symmetric architecture — track-qualified step n
 
 **Goal:** CLI terminal display accurately reflects all pipeline steps (both tracks, stage comparison, resolution) and config.example.yaml documents resolution settings.
 
+**Status:** ✓ Complete (2026-02-12)
 **Gap Closure:** Closes display/UX warning and config documentation gap from v1-MILESTONE-AUDIT.md
 **Plans:** 1 plan
 
 Plans:
-- [ ] 02-01-PLAN.md -- Update PipelineDisplay steps + resolution callbacks + config.example.yaml documentation
+- [x] 02-01-PLAN.md -- Update PipelineDisplay steps + resolution callbacks + config.example.yaml documentation
