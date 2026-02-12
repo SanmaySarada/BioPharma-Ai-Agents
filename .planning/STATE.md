@@ -3,17 +3,17 @@
 ## Current Position
 
 Phase: 1 of 1 (Symmetric Double Programming Architecture)
-Plan: 3 of 4
-Status: In progress
-Last activity: 2026-02-12 - Completed 01-03-PLAN.md
+Plan: 4 of 4
+Status: Phase complete
+Last activity: 2026-02-12 - Completed 01-04-PLAN.md
 
-Progress: [=75%] [######--]
+Progress: [=100%] [########]
 
 Plans:
 - [x] 01-01-PLAN.md -- Foundation models + config + cache key fix
 - [x] 01-02-PLAN.md -- StageComparator for per-stage output comparison
 - [x] 01-03-PLAN.md -- Orchestrator refactor to symmetric _run_track
-- [ ] 01-04-PLAN.md -- ResolutionLoop + integrate into orchestrator
+- [x] 01-04-PLAN.md -- ResolutionLoop + integrate into orchestrator
 
 ## Decisions Made
 - Pipeline architecture uses fork-join pattern with async tracks
@@ -29,6 +29,11 @@ Plans:
 - compare_symmetric bridge method on ConsensusJudge rather than modifying existing compare()
 - DoubleProgrammerAgent deprecated (DeprecationWarning) but not deleted for backward compat
 - Medical Writer uses track_a_result.stats_dir from TrackResult instead of hardcoded path
+- Resolution hints injected via existing previous_error/make_retry_context mechanism (no new agent interface)
+- Cascade re-runs always include all downstream stages (sdtm retriggers adam+stats, adam retriggers stats)
+- _pick_best_track defaults to track_a (Gemini) in V1 when ambiguous
+- Full re-comparison via compare_all_stages after cascade (not just single stage)
+- ConsensusJudge.compare_symmetric removed from run() flow, replaced by StageComparator + ResolutionLoop
 
 ## Known Constraints
 - R code must execute in Docker containers
@@ -38,6 +43,6 @@ Plans:
 
 ## Session Continuity
 
-Last session: 2026-02-12T08:44:10Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-02-12T08:51:08Z
+Stopped at: Completed 01-04-PLAN.md (phase complete)
 Resume file: None
