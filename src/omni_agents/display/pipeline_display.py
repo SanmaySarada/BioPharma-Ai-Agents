@@ -33,26 +33,28 @@ from omni_agents.display.callbacks import ProgressCallback
 # Known pipeline steps in execution order.
 _STEPS = [
     "simulator",
-    "sdtm",
-    "adam",
-    "stats",
-    "double_programmer",
-    "consensus",
+    "sdtm_track_a",
+    "sdtm_track_b",
+    "adam_track_a",
+    "adam_track_b",
+    "stats_track_a",
+    "stats_track_b",
+    "stage_comparison",
     "medical_writer",
 ]
 
 # Steps that advance the Track A progress bar.
-_TRACK_A_STEPS = {"sdtm", "adam", "stats"}
+_TRACK_A_STEPS = {"sdtm_track_a", "adam_track_a", "stats_track_a"}
 
 # Steps that advance the Track B progress bar.
-_TRACK_B_STEPS = {"double_programmer"}
+_TRACK_B_STEPS = {"sdtm_track_b", "adam_track_b", "stats_track_b"}
 
 
 class PipelineDisplay(ProgressCallback):
     """Interactive Rich display for pipeline progress.
 
     When running in a terminal, renders a Live layout with a status table
-    (seven pipeline steps) and two progress bars (Track A, Track B).  In
+    (nine pipeline steps) and two progress bars (Track A, Track B).  In
     non-interactive environments, falls back to plain ``console.print`` calls.
     """
 
@@ -81,7 +83,7 @@ class PipelineDisplay(ProgressCallback):
     # ------------------------------------------------------------------
 
     def _build_table(self) -> Table:
-        """Build the status table showing all seven pipeline steps."""
+        """Build the status table showing all nine pipeline steps."""
         table = Table(title="Pipeline Steps", expand=True)
         table.add_column("Step", style="bold")
         table.add_column("Track")
@@ -148,7 +150,7 @@ class PipelineDisplay(ProgressCallback):
         """Start the Live display (interactive mode only)."""
         self._progress = self._build_progress()
         self._track_a_task = self._progress.add_task("Track A", total=3)
-        self._track_b_task = self._progress.add_task("Track B", total=1)
+        self._track_b_task = self._progress.add_task("Track B", total=3)
 
         if self._interactive:
             from rich.live import Live
