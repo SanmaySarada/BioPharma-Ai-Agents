@@ -21,8 +21,10 @@ class ProgressCallback(Protocol):
         """Called when a pipeline step begins execution.
 
         Args:
-            step_name: Identifier for the step (e.g. ``"simulator"``).
-            agent_type: Class name of the agent (e.g. ``"SimulatorAgent"``).
+            step_name: Identifier for the step. With symmetric tracks, step names
+                are track-qualified: ``"sdtm_track_a"``, ``"adam_track_b"``, etc.
+                Shared steps use unqualified names: ``"simulator"``, ``"consensus"``.
+            agent_type: Class name of the agent (e.g. ``"SDTMAgent"``).
             track: Pipeline track (``"shared"``, ``"track_a"``, ``"track_b"``).
         """
         ...
@@ -96,5 +98,29 @@ class ProgressCallback(Protocol):
 
         Args:
             error: Human-readable error description.
+        """
+        ...
+
+    def on_resolution_start(
+        self, stage: str, iteration: int, max_iterations: int
+    ) -> None:
+        """Called when resolution begins for a disagreeing stage.
+
+        Args:
+            stage: Pipeline stage being resolved ("sdtm", "adam", "stats").
+            iteration: Current resolution iteration (1-indexed).
+            max_iterations: Maximum iterations allowed.
+        """
+        ...
+
+    def on_resolution_complete(
+        self, stage: str, resolved: bool, iterations: int
+    ) -> None:
+        """Called when resolution finishes for a stage.
+
+        Args:
+            stage: Pipeline stage that was resolved.
+            resolved: True if tracks now agree.
+            iterations: Total resolution iterations performed.
         """
         ...
