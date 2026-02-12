@@ -395,6 +395,3 @@ mypy src/omni_agents/
 pytest
 ```
 
-## License
-
-MIT
