@@ -15,3 +15,11 @@ Plans:
 - [x] 01-02-PLAN.md -- StageComparator for per-stage output comparison (SDTM, ADaM, Stats)
 - [x] 01-03-PLAN.md -- Orchestrator refactor to symmetric _run_track + deprecate DoubleProgrammerAgent
 - [x] 01-04-PLAN.md -- ResolutionLoop + integrate stage comparison and resolution into orchestrator
+
+### Phase 2: Display Layer Update
+Update PipelineDisplay for the symmetric architecture — track-qualified step names, resolution callbacks, and config documentation. Closes tech debt from milestone audit.
+
+**Goal:** CLI terminal display accurately reflects all pipeline steps (both tracks, stage comparison, resolution) and config.example.yaml documents resolution settings.
+
+**Gap Closure:** Closes display/UX warning and config documentation gap from v1-MILESTONE-AUDIT.md
+**Plans:** TBD
