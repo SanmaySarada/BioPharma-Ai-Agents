@@ -2,8 +2,12 @@
 
 Runs the full pipeline: Simulator -> fork(Track A, Track B) -> ConsensusJudge
 -> Medical Writer, with schema validation gates and pre-execution R code checks
-between each agent handoff.  Track A uses Gemini; Track B uses GPT-4 for model
-diversity.
+between each agent handoff.
+
+Both tracks run the same SDTM -> ADaM -> Stats pipeline independently via a
+generic ``_run_track`` method.  Track A uses Gemini; Track B uses GPT-4 for
+model diversity.  Stage-by-stage comparison (StageComparator) and resolution
+loop (ResolutionLoop) will be added in Plan 04.
 """
 
 import asyncio
@@ -18,7 +22,6 @@ from rich.console import Console
 
 from omni_agents.agents.adam import ADaMAgent
 from omni_agents.agents.base import BaseAgent
-from omni_agents.agents.double_programmer import DoubleProgrammerAgent
 from omni_agents.agents.medical_writer import MedicalWriterAgent
 from omni_agents.agents.sdtm import SDTMAgent
 from omni_agents.agents.simulator import SimulatorAgent
@@ -27,9 +30,11 @@ from omni_agents.config import Settings
 from omni_agents.display.callbacks import ProgressCallback
 from omni_agents.docker.engine import DockerEngine
 from omni_agents.docker.r_executor import RExecutor
+from omni_agents.llm.base import BaseLLM
 from omni_agents.llm.gemini import GeminiAdapter
 from omni_agents.llm.openai_adapter import OpenAIAdapter
 from omni_agents.models.consensus import Verdict
+from omni_agents.models.resolution import TrackResult
 from omni_agents.models.pipeline import PipelineState, StepResult, StepState, StepStatus
 from omni_agents.pipeline.consensus import ConsensusHaltError, ConsensusJudge
 from omni_agents.pipeline.logging import (
@@ -50,14 +55,18 @@ from omni_agents.pipeline.script_cache import ScriptCache
 
 
 class PipelineOrchestrator:
-    """Orchestrates Track A + Track B parallel pipeline with consensus gating.
+    """Orchestrates symmetric Track A + Track B parallel pipeline with consensus gating.
 
     Runs Simulator sequentially (both tracks need the raw data), then forks
-    Track A (Gemini: SDTM -> ADaM -> Stats) and Track B (GPT-4: independent
-    validation) in parallel via ``asyncio.gather()``.  After both tracks
-    complete, the ConsensusJudge compares results and the pipeline proceeds
-    (PASS/WARNING) or halts (HALT).  On PASS/WARNING, the Medical Writer
-    generates a Clinical Study Report (.docx) from stats output and verdict.
+    Track A (Gemini: SDTM -> ADaM -> Stats) and Track B (GPT-4: SDTM -> ADaM
+    -> Stats) in parallel via ``asyncio.gather()``, using the generic
+    ``_run_track`` method.  After both tracks complete, the ConsensusJudge
+    compares results and the pipeline proceeds (PASS/WARNING) or halts (HALT).
+    On PASS/WARNING, the Medical Writer generates a Clinical Study Report
+    (.docx) from stats output and verdict.
+
+    Stage-by-stage comparison (StageComparator) and resolution loop
+    (ResolutionLoop) will replace the current ConsensusJudge in Plan 04.
     """
 
     def __init__(
@@ -90,6 +99,7 @@ class PipelineOrchestrator:
         input_volumes: dict[str, str] | None = None,
         expected_inputs: list[str] | None = None,
         expected_outputs: list[str] | None = None,
+        track_id: str = "",
     ) -> tuple[str, list]:
         """Run a single agent through the generate-validate-execute-retry loop.
 
@@ -106,11 +116,13 @@ class PipelineOrchestrator:
             input_volumes: Read-only input volume mounts
             expected_inputs: File paths the R code should reference (for pre-exec validation)
             expected_outputs: File paths the R code should produce (for pre-exec validation)
+            track_id: Track identifier for cache key isolation (e.g. "track_a",
+                "track_b"). Defaults to empty string for shared agents.
 
         Returns:
             Tuple of (stdout, attempts)
         """
-        cache_key = ScriptCache.cache_key(self.settings.trial, agent.name)
+        cache_key = ScriptCache.cache_key(self.settings.trial, agent.name, track_id)
 
         async def generate_code(
             previous_error: str | None, attempt: int
@@ -239,37 +251,47 @@ class PipelineOrchestrator:
         state.current_step = name
         state.save(state_path)
 
-    async def _run_track_a(
+    async def _run_track(
         self,
+        track_id: str,
+        llm: BaseLLM,
         raw_dir: Path,
         output_dir: Path,
-        gemini: GeminiAdapter,
         prompt_dir: Path,
         state: PipelineState,
         state_path: Path,
-    ) -> Path:
-        """Run Track A pipeline: SDTM -> ADaM -> Stats.
+    ) -> TrackResult:
+        """Run full SDTM -> ADaM -> Stats pipeline for one track.
+
+        This is the generic track runner: both Track A and Track B execute
+        the same agent sequence (SDTMAgent -> ADaMAgent -> StatsAgent) with
+        schema validation gates between each stage.  The only differences
+        are the ``track_id`` (which qualifies output directories, step names,
+        and cache keys) and the ``llm`` adapter.
 
         Args:
+            track_id: Identifier for this track ("track_a" or "track_b").
+            llm: LLM adapter for this track's code generation.
             raw_dir: Directory containing raw SBPdata.csv.
             output_dir: Run output directory.
-            gemini: GeminiAdapter for Track A LLM calls.
             prompt_dir: Path to prompt templates.
             state: Pipeline state for step recording.
             state_path: Path to pipeline_state.json.
 
         Returns:
-            Path to Track A ``results.json``.
+            A :class:`TrackResult` with paths to each stage's output directory
+            and the final results.json.
         """
-        # === SDTM Agent ===
-        sdtm_dir = output_dir / "track_a" / "sdtm"
-        sdtm_dir.mkdir(parents=True, exist_ok=True)
+        track_dir = output_dir / track_id
 
+        # === SDTM Agent ===
+        sdtm_dir = track_dir / "sdtm"
+        sdtm_dir.mkdir(parents=True, exist_ok=True)
         sdtm_agent = SDTMAgent(
-            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+            llm=llm, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
         if self.callback:
-            self.callback.on_step_start("sdtm", "SDTMAgent", "track_a")
+            self.callback.on_step_start(f"sdtm_{track_id}", "SDTMAgent", track_id)
         t0 = time.monotonic()
         _stdout, sdtm_attempts = await self._run_agent(
             agent=sdtm_agent,
@@ -281,27 +303,25 @@ class PipelineOrchestrator:
             input_volumes={str(raw_dir): "/workspace/input"},
             expected_inputs=["/workspace/input/SBPdata.csv"],
             expected_outputs=["DM.csv", "VS.csv"],
+            track_id=track_id,
         )
         duration = time.monotonic() - t0
         self._record_step(
-            state, state_path, "sdtm", "SDTMAgent", "track_a", sdtm_attempts
+            state, state_path, f"sdtm_{track_id}", "SDTMAgent", track_id, sdtm_attempts
         )
         if self.callback:
-            self.callback.on_step_complete("sdtm", duration, len(sdtm_attempts))
-
-        # Validate SDTM output (PIPE-06)
+            self.callback.on_step_complete(f"sdtm_{track_id}", duration, len(sdtm_attempts))
         SchemaValidator.validate_sdtm(sdtm_dir, self.settings.trial.n_subjects)
-        logger.info("SDTM schema validation passed")
+        logger.info(f"SDTM schema validation passed ({track_id})")
 
         # === ADaM Agent ===
-        adam_dir = output_dir / "track_a" / "adam"
+        adam_dir = track_dir / "adam"
         adam_dir.mkdir(parents=True, exist_ok=True)
-
         adam_agent = ADaMAgent(
-            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+            llm=llm, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
         if self.callback:
-            self.callback.on_step_start("adam", "ADaMAgent", "track_a")
+            self.callback.on_step_start(f"adam_{track_id}", "ADaMAgent", track_id)
         t0 = time.monotonic()
         _stdout, adam_attempts = await self._run_agent(
             agent=adam_agent,
@@ -313,27 +333,25 @@ class PipelineOrchestrator:
             input_volumes={str(sdtm_dir): "/workspace/input"},
             expected_inputs=["DM.csv", "VS.csv"],
             expected_outputs=["ADTTE.rds", "ADTTE_summary.json"],
+            track_id=track_id,
         )
         duration = time.monotonic() - t0
         self._record_step(
-            state, state_path, "adam", "ADaMAgent", "track_a", adam_attempts
+            state, state_path, f"adam_{track_id}", "ADaMAgent", track_id, adam_attempts
         )
         if self.callback:
-            self.callback.on_step_complete("adam", duration, len(adam_attempts))
-
-        # Validate ADaM output (PIPE-06)
+            self.callback.on_step_complete(f"adam_{track_id}", duration, len(adam_attempts))
         SchemaValidator.validate_adam(adam_dir, self.settings.trial.n_subjects)
-        logger.info("ADaM schema validation passed")
+        logger.info(f"ADaM schema validation passed ({track_id})")
 
         # === Stats Agent ===
-        stats_dir = output_dir / "track_a" / "stats"
+        stats_dir = track_dir / "stats"
         stats_dir.mkdir(parents=True, exist_ok=True)
-
         stats_agent = StatsAgent(
-            llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
+            llm=llm, prompt_dir=prompt_dir, trial_config=self.settings.trial
         )
         if self.callback:
-            self.callback.on_step_start("stats", "StatsAgent", "track_a")
+            self.callback.on_step_start(f"stats_{track_id}", "StatsAgent", track_id)
         t0 = time.monotonic()
         _stdout, stats_attempts = await self._run_agent(
             agent=stats_agent,
@@ -349,91 +367,33 @@ class PipelineOrchestrator:
             },
             expected_inputs=["ADTTE.rds", "DM.csv"],
             expected_outputs=["results.json", "km_plot.png"],
+            track_id=track_id,
         )
         duration = time.monotonic() - t0
         self._record_step(
-            state, state_path, "stats", "StatsAgent", "track_a", stats_attempts
+            state, state_path, f"stats_{track_id}", "StatsAgent", track_id, stats_attempts
         )
         if self.callback:
-            self.callback.on_step_complete("stats", duration, len(stats_attempts))
-
-        # Validate Stats output (PIPE-06)
+            self.callback.on_step_complete(f"stats_{track_id}", duration, len(stats_attempts))
         SchemaValidator.validate_stats(stats_dir)
-        logger.info("Stats schema validation passed")
+        logger.info(f"Stats schema validation passed ({track_id})")
 
-        return stats_dir / "results.json"
-
-    async def _run_track_b(
-        self,
-        raw_dir: Path,
-        output_dir: Path,
-        openai: OpenAIAdapter,
-        prompt_dir: Path,
-        state: PipelineState,
-        state_path: Path,
-    ) -> Path:
-        """Run Track B pipeline: DoubleProgrammerAgent independent validation.
-
-        Track B receives ONLY raw SBPdata.csv -- no access to Track A outputs.
-        This enforces isolation (ISOL-01 through ISOL-03).
-
-        Args:
-            raw_dir: Directory containing raw SBPdata.csv.
-            output_dir: Run output directory.
-            openai: OpenAIAdapter for Track B LLM calls.
-            prompt_dir: Path to prompt templates.
-            state: Pipeline state for step recording.
-            state_path: Path to pipeline_state.json.
-
-        Returns:
-            Path to Track B ``validation.json``.
-        """
-        track_b_dir = output_dir / "track_b"
-        track_b_dir.mkdir(parents=True, exist_ok=True)
-
-        agent = DoubleProgrammerAgent(
-            llm=openai,
-            prompt_dir=prompt_dir,
-            trial_config=self.settings.trial,
+        return TrackResult(
+            track_id=track_id,
+            sdtm_dir=sdtm_dir,
+            adam_dir=adam_dir,
+            stats_dir=stats_dir,
+            results_path=stats_dir / "results.json",
         )
-        if self.callback:
-            self.callback.on_step_start("double_programmer", "DoubleProgrammerAgent", "track_b")
-        t0 = time.monotonic()
-        _stdout, dp_attempts = await self._run_agent(
-            agent=agent,
-            context={
-                "input_path": "/workspace/input/SBPdata.csv",
-                "output_dir": "/workspace",
-            },
-            work_dir=track_b_dir,
-            # CRITICAL ISOLATION (ISOL-01, ISOL-02, ISOL-03):
-            # Track B only sees raw data. No sdtm_dir, adam_dir, or stats_dir.
-            input_volumes={str(raw_dir): "/workspace/input"},
-            expected_inputs=["/workspace/input/SBPdata.csv"],
-            expected_outputs=["validation.json"],
-        )
-        duration = time.monotonic() - t0
-        self._record_step(
-            state,
-            state_path,
-            "double_programmer",
-            "DoubleProgrammerAgent",
-            "track_b",
-            dp_attempts,
-        )
-        if self.callback:
-            self.callback.on_step_complete("double_programmer", duration, len(dp_attempts))
-
-        # Validate Track B output (PIPE-06 for Track B)
-        SchemaValidator.validate_track_b(track_b_dir)
-        logger.info("Track B schema validation passed")
-
-        return track_b_dir / "validation.json"
 
     async def run(self) -> Path:
-        """Execute the full pipeline with parallel tracks and consensus gate.
+        """Execute the full pipeline with symmetric parallel tracks and consensus gate.
 
-        Flow: Simulator -> fork(Track A, Track B) -> ConsensusJudge -> Medical Writer.
+        Flow: Simulator -> fork(Track A via _run_track, Track B via _run_track)
+        -> ConsensusJudge -> Medical Writer.
+
+        Both tracks run the full SDTM -> ADaM -> Stats pipeline independently.
+        Stage-by-stage comparison and resolution loop will be added in Plan 04.
 
         Returns:
             Path to the run output directory.
@@ -504,11 +464,11 @@ class PipelineOrchestrator:
 
         t_start = time.monotonic()
         track_a_result, track_b_result = await asyncio.gather(
-            self._run_track_a(
-                raw_dir, output_dir, gemini, prompt_dir, state, state_path
+            self._run_track(
+                "track_a", gemini, raw_dir, output_dir, prompt_dir, state, state_path
             ),
-            self._run_track_b(
-                raw_dir, output_dir, openai, prompt_dir, state, state_path
+            self._run_track(
+                "track_b", openai, raw_dir, output_dir, prompt_dir, state, state_path
             ),
         )
         t_parallel = time.monotonic() - t_start
@@ -519,11 +479,13 @@ class PipelineOrchestrator:
         consensus_dir = output_dir / "consensus"
         consensus_dir.mkdir(parents=True, exist_ok=True)
 
-        # Run consensus comparison
+        # Run consensus comparison (symmetric: both tracks produce results.json)
         if self.callback:
             self.callback.on_step_start("consensus", "ConsensusJudge", "shared")
         t0 = time.monotonic()
-        verdict = ConsensusJudge.compare(track_a_result, track_b_result)
+        verdict = ConsensusJudge.compare_symmetric(
+            track_a_result.results_path, track_b_result.results_path
+        )
 
         # Save verdict to consensus directory
         verdict_path = consensus_dir / "verdict.json"
@@ -585,7 +547,7 @@ class PipelineOrchestrator:
         csr_dir = output_dir / "csr"
         csr_dir.mkdir(parents=True, exist_ok=True)
 
-        stats_dir = output_dir / "track_a" / "stats"
+        stats_dir = track_a_result.stats_dir
 
         writer_agent = MedicalWriterAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial

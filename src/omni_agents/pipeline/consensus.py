@@ -48,7 +48,11 @@ class ConsensusJudge:
 
     @classmethod
     def compare(cls, track_a_path: Path, track_b_path: Path) -> ConsensusVerdict:
-        """Compare Track A results.json and Track B validation.json.
+        """Compare Track A results.json and Track B validation.json (asymmetric).
+
+        .. deprecated::
+            Use :meth:`compare_symmetric` for the symmetric double programming
+            architecture where both tracks produce results.json.
 
         Args:
             track_a_path: Path to Track A ``results.json``.
@@ -133,6 +137,137 @@ class ConsensusJudge:
                     comp.verdict = Verdict.WARNING
                 else:
                     # KM medians: WARNING
+                    comp.verdict = Verdict.WARNING
+
+        # ------------------------------------------------------------------
+        # 4. Overall verdict: worst of all per-metric verdicts
+        # ------------------------------------------------------------------
+        all_comparisons = structural_comparisons + stat_comparisons
+
+        has_halt = any(c.verdict == Verdict.HALT for c in all_comparisons)
+        has_warning = any(c.verdict == Verdict.WARNING for c in all_comparisons)
+
+        if has_halt:
+            overall = Verdict.HALT
+        elif has_warning:
+            overall = Verdict.WARNING
+        else:
+            overall = Verdict.PASS
+
+        # ------------------------------------------------------------------
+        # 5. Boundary warnings (JUDG-07)
+        # ------------------------------------------------------------------
+        boundary_warnings = cls._check_boundary_warnings(p_a, p_b)
+
+        # ------------------------------------------------------------------
+        # 6. Investigation hints (JUDG-09)
+        # ------------------------------------------------------------------
+        hints = cls._generate_hints(stat_comparisons)
+
+        return ConsensusVerdict(
+            verdict=overall,
+            comparisons=all_comparisons,
+            boundary_warnings=boundary_warnings,
+            investigation_hints=hints,
+        )
+
+    @classmethod
+    def compare_symmetric(
+        cls, track_a_results: Path, track_b_results: Path
+    ) -> ConsensusVerdict:
+        """Compare two results.json files from symmetric tracks.
+
+        Temporary bridge method until StageComparator replaces ConsensusJudge
+        in Plan 04.  Both files have identical structure (table2, table3,
+        metadata) since both tracks now run the full SDTM -> ADaM -> Stats
+        pipeline.
+
+        Args:
+            track_a_results: Path to Track A ``results.json``.
+            track_b_results: Path to Track B ``results.json``.
+
+        Returns:
+            A :class:`ConsensusVerdict` with per-metric comparisons,
+            overall verdict, boundary warnings, and investigation hints.
+        """
+        track_a = json.loads(track_a_results.read_text())
+        track_b = json.loads(track_b_results.read_text())
+
+        # ------------------------------------------------------------------
+        # 1. Structural pre-check (JUDG-08)
+        # ------------------------------------------------------------------
+        structural_comparisons: list[MetricComparison] = []
+        structural_halt = False
+
+        for metric in sorted(cls.STRUCTURAL_METRICS):
+            a_val = float(track_a["metadata"][metric])
+            b_val = float(track_b["metadata"][metric])
+            comp = cls._compare_metric(metric, a_val, b_val)
+            structural_comparisons.append(comp)
+            if not comp.within_tolerance:
+                structural_halt = True
+
+        if structural_halt:
+            return ConsensusVerdict(
+                verdict=Verdict.HALT,
+                comparisons=structural_comparisons,
+                boundary_warnings=[],
+                investigation_hints=[
+                    "Structural mismatch: Track A and Track B analyzed different "
+                    "numbers of subjects/events/censored. Check raw data processing "
+                    "logic in both tracks."
+                ],
+            )
+
+        # ------------------------------------------------------------------
+        # 2. Statistical comparisons (same keys from both results.json)
+        # ------------------------------------------------------------------
+        stat_comparisons: list[MetricComparison] = []
+
+        # logrank_p: both from table2.logrank_p
+        p_a = float(track_a["table2"]["logrank_p"])
+        p_b = float(track_b["table2"]["logrank_p"])
+        stat_comparisons.append(cls._compare_metric("logrank_p", p_a, p_b))
+
+        # cox_hr: both from table3.cox_hr
+        hr_a = float(track_a["table3"]["cox_hr"])
+        hr_b = float(track_b["table3"]["cox_hr"])
+        stat_comparisons.append(cls._compare_metric("cox_hr", hr_a, hr_b))
+
+        # KM medians (optional -- skip gracefully if either doesn't provide)
+        if (
+            "km_median_treatment" in track_a.get("table2", {})
+            and "km_median_treatment" in track_b.get("table2", {})
+        ):
+            km_treat_a = float(track_a["table2"]["km_median_treatment"])
+            km_treat_b = float(track_b["table2"]["km_median_treatment"])
+            stat_comparisons.append(
+                cls._compare_metric("km_median_treatment", km_treat_a, km_treat_b)
+            )
+
+        if (
+            "km_median_placebo" in track_a.get("table2", {})
+            and "km_median_placebo" in track_b.get("table2", {})
+        ):
+            km_plac_a = float(track_a["table2"]["km_median_placebo"])
+            km_plac_b = float(track_b["table2"]["km_median_placebo"])
+            stat_comparisons.append(
+                cls._compare_metric("km_median_placebo", km_plac_a, km_plac_b)
+            )
+
+        # ------------------------------------------------------------------
+        # 3. Determine per-metric verdict
+        # ------------------------------------------------------------------
+        for comp in stat_comparisons:
+            if not comp.within_tolerance:
+                if comp.metric == "logrank_p":
+                    if cls._crosses_boundary(p_a, p_b):
+                        comp.verdict = Verdict.HALT
+                    else:
+                        comp.verdict = Verdict.WARNING
+                elif comp.metric == "cox_hr":
+                    comp.verdict = Verdict.WARNING
+                else:
                     comp.verdict = Verdict.WARNING
 
         # ------------------------------------------------------------------
