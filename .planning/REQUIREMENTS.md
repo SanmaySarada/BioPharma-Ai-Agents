@@ -47,24 +47,24 @@ Which phases cover which requirements. Updated by create-roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STDERR-01 | — | Pending |
-| STDERR-02 | — | Pending |
-| STDERR-03 | — | Pending |
-| ERRCLASS-01 | — | Pending |
-| ERRCLASS-02 | — | Pending |
-| ERRCLASS-03 | — | Pending |
-| ERRDSP-01 | — | Pending |
-| ERRDSP-02 | — | Pending |
-| RESIL-01 | — | Pending |
-| RESIL-02 | — | Pending |
-| RESIL-03 | — | Pending |
-| RESIL-04 | — | Pending |
+| STDERR-01 | Phase 3 | Pending |
+| STDERR-02 | Phase 3 | Pending |
+| STDERR-03 | Phase 3 | Pending |
+| ERRCLASS-01 | Phase 3 | Pending |
+| ERRCLASS-02 | Phase 3 | Pending |
+| ERRCLASS-03 | Phase 3 | Pending |
+| ERRDSP-01 | Phase 3 | Pending |
+| ERRDSP-02 | Phase 3 | Pending |
+| RESIL-01 | Phase 4 | Pending |
+| RESIL-02 | Phase 4 | Pending |
+| RESIL-03 | Phase 4 | Pending |
+| RESIL-04 | Phase 4 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12
+- Mapped to phases: 12
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-12 after initial definition*
+*Last updated: 2026-02-12 after roadmap creation*
