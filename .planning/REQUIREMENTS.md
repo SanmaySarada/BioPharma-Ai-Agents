@@ -1,0 +1,70 @@
+# Requirements: omni-ai-agents v1.1
+
+**Defined:** 2026-02-12
+**Core Value:** Computational double programming for regulated biostatistics
+
+## v1.1 Requirements
+
+### Stderr Filtering
+
+- [ ] **STDERR-01**: Strip R package loading messages (library load, attach, mask warnings, tidyverse conflicts) from stderr before processing
+- [ ] **STDERR-02**: Preserve actual R errors and warnings in filtered stderr output
+- [ ] **STDERR-03**: Apply stderr filtering before error classification, LLM retry feedback, and error display
+
+### Error Classification
+
+- [ ] **ERRCLASS-01**: Fix `"object"` pattern in `classify_error` to not false-match on `"The following object is masked"`
+- [ ] **ERRCLASS-02**: Audit all `code_patterns` for similar false-positive risks with standard R stderr noise
+- [ ] **ERRCLASS-03**: Make error patterns match in error-context only (e.g., lines starting with `Error` or within error messages)
+
+### Error Display
+
+- [ ] **ERRDSP-01**: Show actual R error in terminal error panel and pipeline logs, not truncated package loading noise
+- [ ] **ERRDSP-02**: Ensure the 500-char truncation window contains the real error by filtering noise before truncation
+
+### Pipeline Resilience
+
+- [ ] **RESIL-01**: Catch per-track exceptions in `asyncio.gather()` so one track failure does not crash the other
+- [ ] **RESIL-02**: If one track fails, continue pipeline with the surviving track's results
+- [ ] **RESIL-03**: Display failed track status in pipeline display (step marked as failed, progress bar updated)
+- [ ] **RESIL-04**: Degrade gracefully to single-track mode: skip stage comparison, proceed to Medical Writer with surviving track
+
+## v2 Requirements
+
+None deferred from v1.1.
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Smarter `_pick_best_track` heuristic | Deferred to v2.0 — not related to reliability |
+| Schema validator integration in resolution hints | Deferred to v2.0 — not related to reliability |
+| Suppressing R package loading at Docker/Rscript level | Would change Docker execution contract; filtering in Python is safer and more maintainable |
+
+## Traceability
+
+Which phases cover which requirements. Updated by create-roadmap.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| STDERR-01 | — | Pending |
+| STDERR-02 | — | Pending |
+| STDERR-03 | — | Pending |
+| ERRCLASS-01 | — | Pending |
+| ERRCLASS-02 | — | Pending |
+| ERRCLASS-03 | — | Pending |
+| ERRDSP-01 | — | Pending |
+| ERRDSP-02 | — | Pending |
+| RESIL-01 | — | Pending |
+| RESIL-02 | — | Pending |
+| RESIL-03 | — | Pending |
+| RESIL-04 | — | Pending |
+
+**Coverage:**
+- v1.1 requirements: 12 total
+- Mapped to phases: 0
+- Unmapped: 12
+
+---
+*Requirements defined: 2026-02-12*
+*Last updated: 2026-02-12 after initial definition*
