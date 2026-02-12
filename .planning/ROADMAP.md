@@ -45,11 +45,12 @@ Plans:
   1. When an R script fails, the actual R error is visible in the terminal error panel (not package loading noise)
   2. `classify_error` correctly classifies errors from scripts that load survminer/tidyverse (no false positives on "object is masked")
   3. LLM retry attempts receive filtered stderr with the actual error, enabling effective code fixes
-**Research**: Unlikely (known codebase, clear fix)
-**Plans**: TBD
+**Research**: Complete (03-RESEARCH.md)
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-01-PLAN.md — TDD: filter_r_stderr() function with comprehensive tests
+- [ ] 03-02-PLAN.md — Integrate filter into retry chokepoint + fix classify_error patterns
 
 ### Phase 4: Pipeline Resilience
 **Goal**: One track failure does not crash the pipeline; surviving track continues to produce results
@@ -72,5 +73,5 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 1. Symmetric Double Programming | v1.0 | 3/3 | Complete | 2026-02-12 |
 | 2. Display Layer Update | v1.0 | 1/1 | Complete | 2026-02-12 |
-| 3. Stderr Filtering & Error Classification | v1.1 | 0/? | Not started | - |
+| 3. Stderr Filtering & Error Classification | v1.1 | 0/2 | Planned | - |
 | 4. Pipeline Resilience | v1.1 | 0/? | Not started | - |
