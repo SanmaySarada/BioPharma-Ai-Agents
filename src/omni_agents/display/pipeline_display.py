@@ -250,6 +250,24 @@ class PipelineDisplay(ProgressCallback):
     def on_pipeline_fail(self, error: str) -> None:
         self.stop()
 
+    def on_resolution_start(
+        self, stage: str, iteration: int, max_iterations: int
+    ) -> None:
+        if not self._interactive:
+            self.console.print(
+                f"[resolution] Resolving {stage} disagreement "
+                f"(iteration {iteration}/{max_iterations})"
+            )
+
+    def on_resolution_complete(
+        self, stage: str, resolved: bool, iterations: int
+    ) -> None:
+        status = "resolved" if resolved else "unresolved"
+        if not self._interactive:
+            self.console.print(
+                f"[resolution] {stage} {status} after {iterations} iteration(s)"
+            )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
