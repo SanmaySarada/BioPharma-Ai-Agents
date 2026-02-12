@@ -32,7 +32,7 @@ Plans:
 
 **Milestone Goal:** Fix error handling so the pipeline reliably completes even when one track's R code fails, and make R errors visible for effective debugging and retry.
 
-- [ ] **Phase 3: Stderr Filtering & Error Classification** — Fix error visibility, classification, and retry feedback
+- [x] **Phase 3: Stderr Filtering & Error Classification** — Fix error visibility, classification, and retry feedback
 - [ ] **Phase 4: Pipeline Resilience** — Per-track error isolation with single-track fallback
 
 ## Phase Details
@@ -49,8 +49,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — TDD: filter_r_stderr() function with comprehensive tests
-- [ ] 03-02-PLAN.md — Integrate filter into retry chokepoint + fix classify_error patterns
+- [x] 03-01-PLAN.md — TDD: filter_r_stderr() function with comprehensive tests
+- [x] 03-02-PLAN.md — Integrate filter into retry chokepoint + fix classify_error patterns
 
 ### Phase 4: Pipeline Resilience
 **Goal**: One track failure does not crash the pipeline; surviving track continues to produce results
@@ -73,5 +73,5 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 1. Symmetric Double Programming | v1.0 | 3/3 | Complete | 2026-02-12 |
 | 2. Display Layer Update | v1.0 | 1/1 | Complete | 2026-02-12 |
-| 3. Stderr Filtering & Error Classification | v1.1 | 0/2 | Planned | - |
+| 3. Stderr Filtering & Error Classification | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 4. Pipeline Resilience | v1.1 | 0/? | Not started | - |

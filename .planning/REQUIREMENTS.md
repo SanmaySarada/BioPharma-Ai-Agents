@@ -7,20 +7,20 @@
 
 ### Stderr Filtering
 
-- [ ] **STDERR-01**: Strip R package loading messages (library load, attach, mask warnings, tidyverse conflicts) from stderr before processing
-- [ ] **STDERR-02**: Preserve actual R errors and warnings in filtered stderr output
-- [ ] **STDERR-03**: Apply stderr filtering before error classification, LLM retry feedback, and error display
+- [x] **STDERR-01**: Strip R package loading messages (library load, attach, mask warnings, tidyverse conflicts) from stderr before processing
+- [x] **STDERR-02**: Preserve actual R errors and warnings in filtered stderr output
+- [x] **STDERR-03**: Apply stderr filtering before error classification, LLM retry feedback, and error display
 
 ### Error Classification
 
-- [ ] **ERRCLASS-01**: Fix `"object"` pattern in `classify_error` to not false-match on `"The following object is masked"`
-- [ ] **ERRCLASS-02**: Audit all `code_patterns` for similar false-positive risks with standard R stderr noise
-- [ ] **ERRCLASS-03**: Make error patterns match in error-context only (e.g., lines starting with `Error` or within error messages)
+- [x] **ERRCLASS-01**: Fix `"object"` pattern in `classify_error` to not false-match on `"The following object is masked"`
+- [x] **ERRCLASS-02**: Audit all `code_patterns` for similar false-positive risks with standard R stderr noise
+- [x] **ERRCLASS-03**: Make error patterns match in error-context only (e.g., lines starting with `Error` or within error messages)
 
 ### Error Display
 
-- [ ] **ERRDSP-01**: Show actual R error in terminal error panel and pipeline logs, not truncated package loading noise
-- [ ] **ERRDSP-02**: Ensure the 500-char truncation window contains the real error by filtering noise before truncation
+- [x] **ERRDSP-01**: Show actual R error in terminal error panel and pipeline logs, not truncated package loading noise
+- [x] **ERRDSP-02**: Ensure the 500-char truncation window contains the real error by filtering noise before truncation
 
 ### Pipeline Resilience
 
@@ -47,14 +47,14 @@ Which phases cover which requirements. Updated by create-roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STDERR-01 | Phase 3 | Pending |
-| STDERR-02 | Phase 3 | Pending |
-| STDERR-03 | Phase 3 | Pending |
-| ERRCLASS-01 | Phase 3 | Pending |
-| ERRCLASS-02 | Phase 3 | Pending |
-| ERRCLASS-03 | Phase 3 | Pending |
-| ERRDSP-01 | Phase 3 | Pending |
-| ERRDSP-02 | Phase 3 | Pending |
+| STDERR-01 | Phase 3 | Complete |
+| STDERR-02 | Phase 3 | Complete |
+| STDERR-03 | Phase 3 | Complete |
+| ERRCLASS-01 | Phase 3 | Complete |
+| ERRCLASS-02 | Phase 3 | Complete |
+| ERRCLASS-03 | Phase 3 | Complete |
+| ERRDSP-01 | Phase 3 | Complete |
+| ERRDSP-02 | Phase 3 | Complete |
 | RESIL-01 | Phase 4 | Pending |
 | RESIL-02 | Phase 4 | Pending |
 | RESIL-03 | Phase 4 | Pending |
@@ -67,4 +67,4 @@ Which phases cover which requirements. Updated by create-roadmap.
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-12 after roadmap creation*
+*Last updated: 2026-02-12 after Phase 3 completion*
