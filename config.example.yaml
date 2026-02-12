@@ -53,5 +53,12 @@ llm:
     model: "gpt-4o"
     temperature: 0.0
 
+resolution:
+  # Whether to attempt automated resolution when tracks disagree.
+  # Set to false to halt immediately on any stage disagreement.
+  enabled: true
+  # Maximum resolution iterations before halting or picking best track.
+  max_iterations: 2
+
 # Directory where pipeline outputs are written
 output_dir: "./output"
