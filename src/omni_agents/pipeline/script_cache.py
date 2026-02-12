@@ -26,18 +26,25 @@ class ScriptCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def cache_key(trial_config: TrialConfig, agent_name: str) -> str:
-        """Compute a deterministic cache key from trial config and agent name.
+    def cache_key(trial_config: TrialConfig, agent_name: str, track_id: str = "") -> str:
+        """Compute a deterministic cache key from trial config, agent, and track.
+
+        The track_id parameter prevents cache collisions between tracks in the
+        symmetric double programming architecture. Different tracks using the
+        same agent and config will produce different cache keys.
 
         Args:
             trial_config: The trial configuration to hash.
             agent_name: Agent identifier (e.g. "simulator") to distinguish
                 scripts from different agents.
+            track_id: Track identifier (e.g. "track_a", "track_b"). Defaults
+                to empty string for backward compatibility with agents that
+                have no track (e.g. Simulator).
 
         Returns:
             First 16 characters of the SHA-256 hex digest.
         """
-        payload = trial_config.model_dump_json() + "|" + agent_name
+        payload = trial_config.model_dump_json() + "|" + agent_name + "|" + track_id
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
     def get(self, key: str) -> str | None:
