@@ -1,13 +1,16 @@
 """Pipeline orchestrator wiring agents to Docker execution.
 
-Runs the full pipeline: Simulator -> fork(Track A, Track B) -> ConsensusJudge
--> Medical Writer, with schema validation gates and pre-execution R code checks
-between each agent handoff.
+Runs the full pipeline: Simulator -> fork(Track A, Track B) ->
+StageComparator + ResolutionLoop -> Medical Writer, with schema validation
+gates and pre-execution R code checks between each agent handoff.
 
 Both tracks run the same SDTM -> ADaM -> Stats pipeline independently via a
 generic ``_run_track`` method.  Track A uses Gemini; Track B uses GPT-4 for
-model diversity.  Stage-by-stage comparison (StageComparator) and resolution
-loop (ResolutionLoop) will be added in Plan 04.
+model diversity.  After both tracks complete in parallel, StageComparator
+compares outputs at every stage post-hoc (Strategy C from research -- not
+stage-gated barriers).  When disagreement is detected, the ResolutionLoop
+diagnoses the failing track, generates targeted hints, and retries with
+cascading downstream re-runs.
 """
 
 import asyncio
@@ -33,10 +36,12 @@ from omni_agents.docker.r_executor import RExecutor
 from omni_agents.llm.base import BaseLLM
 from omni_agents.llm.gemini import GeminiAdapter
 from omni_agents.llm.openai_adapter import OpenAIAdapter
-from omni_agents.models.consensus import Verdict
-from omni_agents.models.resolution import TrackResult
+from omni_agents.models.consensus import ConsensusVerdict, Verdict
+from omni_agents.models.resolution import StageComparisonResult, TrackResult
 from omni_agents.models.pipeline import PipelineState, StepResult, StepState, StepStatus
-from omni_agents.pipeline.consensus import ConsensusHaltError, ConsensusJudge
+from omni_agents.pipeline.consensus import ConsensusHaltError
+from omni_agents.pipeline.resolution import ResolutionLoop
+from omni_agents.pipeline.stage_comparator import StageComparator
 from omni_agents.pipeline.logging import (
     log_agent_complete,
     log_agent_start,
@@ -55,18 +60,17 @@ from omni_agents.pipeline.script_cache import ScriptCache
 
 
 class PipelineOrchestrator:
-    """Orchestrates symmetric Track A + Track B parallel pipeline with consensus gating.
+    """Orchestrates symmetric Track A + Track B parallel pipeline with stage comparison.
 
     Runs Simulator sequentially (both tracks need the raw data), then forks
     Track A (Gemini: SDTM -> ADaM -> Stats) and Track B (GPT-4: SDTM -> ADaM
     -> Stats) in parallel via ``asyncio.gather()``, using the generic
-    ``_run_track`` method.  After both tracks complete, the ConsensusJudge
-    compares results and the pipeline proceeds (PASS/WARNING) or halts (HALT).
-    On PASS/WARNING, the Medical Writer generates a Clinical Study Report
-    (.docx) from stats output and verdict.
-
-    Stage-by-stage comparison (StageComparator) and resolution loop
-    (ResolutionLoop) will replace the current ConsensusJudge in Plan 04.
+    ``_run_track`` method.  After both tracks complete, StageComparator
+    compares outputs at every stage post-hoc (Strategy C from research).
+    When disagreement is detected and resolution is enabled, ResolutionLoop
+    diagnoses the failing track, generates hints, and retries with cascading
+    downstream re-runs.  On PASS/WARNING, the Medical Writer generates a
+    Clinical Study Report (.docx) from stats output and verdict.
     """
 
     def __init__(
@@ -387,13 +391,17 @@ class PipelineOrchestrator:
         )
 
     async def run(self) -> Path:
-        """Execute the full pipeline with symmetric parallel tracks and consensus gate.
+        """Execute the full pipeline with symmetric parallel tracks and stage comparison.
 
         Flow: Simulator -> fork(Track A via _run_track, Track B via _run_track)
-        -> ConsensusJudge -> Medical Writer.
+        -> StageComparator (post-hoc, Strategy C) -> ResolutionLoop (if
+        disagreement) -> Medical Writer.
 
-        Both tracks run the full SDTM -> ADaM -> Stats pipeline independently.
-        Stage-by-stage comparison and resolution loop will be added in Plan 04.
+        Both tracks run the full SDTM -> ADaM -> Stats pipeline independently
+        in parallel.  After both complete, StageComparator compares outputs at
+        every stage.  Disagreements trigger the ResolutionLoop which diagnoses
+        the failing track, generates targeted hints, and retries with cascading
+        downstream re-runs.
 
         Returns:
             Path to the run output directory.
@@ -474,29 +482,155 @@ class PipelineOrchestrator:
         t_parallel = time.monotonic() - t_start
         logger.info(f"Parallel execution completed in {t_parallel:.1f}s")
 
-        # === Step 3: Consensus gate (PIPE-04, ISOL-04) ===
-        # Create consensus directory ONLY after both tracks complete (ISOL-04)
+        # === Step 3: Stage-by-stage comparison (post-hoc, Strategy C from research) ===
+        # Both tracks have completed in parallel. Now compare outputs at every stage.
+        # This is NOT stage-gated -- both tracks ran all stages independently.
         consensus_dir = output_dir / "consensus"
         consensus_dir.mkdir(parents=True, exist_ok=True)
 
-        # Run consensus comparison (symmetric: both tracks produce results.json)
         if self.callback:
-            self.callback.on_step_start("consensus", "ConsensusJudge", "shared")
+            self.callback.on_step_start("stage_comparison", "StageComparator", "shared")
         t0 = time.monotonic()
-        verdict = ConsensusJudge.compare_symmetric(
-            track_a_result.results_path, track_b_result.results_path
+
+        comparison_result = StageComparator.compare_all_stages(
+            track_a_result, track_b_result, self.settings.trial.n_subjects
         )
 
-        # Save verdict to consensus directory
+        # Save stage comparisons
+        stage_comparisons_path = consensus_dir / "stage_comparisons.json"
+        stage_comparisons_path.write_text(
+            comparison_result.model_dump_json(indent=2)
+        )
+
+        duration = time.monotonic() - t0
+        if self.callback:
+            self.callback.on_step_complete("stage_comparison", duration, 1)
+
+        # === Step 3b: Resolution loop (if disagreement detected) ===
+        resolution_result = None
+        if comparison_result.has_disagreement and self.settings.resolution.enabled:
+            first_disagreement = comparison_result.first_disagreement
+            logger.warning(
+                f"Stage disagreement at {first_disagreement.stage}: "
+                f"{first_disagreement.issues}"
+            )
+
+            resolution_loop = ResolutionLoop(
+                max_iterations=self.settings.resolution.max_iterations
+            )
+
+            if self.callback:
+                self.callback.on_resolution_start(
+                    first_disagreement.stage,
+                    1,
+                    self.settings.resolution.max_iterations,
+                )
+
+            resolution_result = await resolution_loop.resolve(
+                disagreement=first_disagreement,
+                track_a_result=track_a_result,
+                track_b_result=track_b_result,
+                orchestrator=self,
+                expected_subjects=self.settings.trial.n_subjects,
+            )
+
+            if self.callback:
+                self.callback.on_resolution_complete(
+                    first_disagreement.stage,
+                    resolution_result.resolved,
+                    resolution_result.iterations,
+                )
+
+            # Save resolution log
+            resolution_log_path = consensus_dir / "resolution_log.json"
+            resolution_log_path.write_text(
+                resolution_result.model_dump_json(indent=2)
+            )
+
+            if not resolution_result.resolved:
+                if resolution_result.winning_track is None:
+                    # No winner -- HALT
+                    logger.error(
+                        "Resolution failed: no winning track. Pipeline HALT."
+                    )
+                    state.status = "failed"
+                    state.save(state_path)
+                    raise ConsensusHaltError(
+                        ConsensusVerdict(
+                            verdict=Verdict.HALT,
+                            comparisons=[],
+                            boundary_warnings=[],
+                            investigation_hints=[
+                                f"Stage {first_disagreement.stage} disagreement "
+                                f"unresolved after "
+                                f"{resolution_result.iterations} resolution "
+                                f"iterations. Resolution log: "
+                                f"{resolution_result.resolution_log}"
+                            ],
+                        )
+                    )
+                else:
+                    # Winner chosen but still disagree -- WARNING
+                    logger.warning(
+                        f"Resolution picked {resolution_result.winning_track} "
+                        f"as winner after {resolution_result.iterations} "
+                        f"iterations"
+                    )
+
+        elif comparison_result.has_disagreement and not self.settings.resolution.enabled:
+            # Resolution disabled -- HALT on disagreement
+            first_disagreement = comparison_result.first_disagreement
+            logger.error(
+                f"Stage disagreement at {first_disagreement.stage} and "
+                f"resolution is disabled. Pipeline HALT."
+            )
+            state.status = "failed"
+            state.save(state_path)
+            raise ConsensusHaltError(
+                ConsensusVerdict(
+                    verdict=Verdict.HALT,
+                    comparisons=[],
+                    boundary_warnings=[],
+                    investigation_hints=[
+                        f"Stage {first_disagreement.stage} disagreement. "
+                        f"Resolution disabled. "
+                        f"Issues: {first_disagreement.issues}"
+                    ],
+                )
+            )
+
+        # Build verdict for Medical Writer
+        if (
+            comparison_result.has_disagreement
+            and resolution_result
+            and resolution_result.winning_track
+        ):
+            overall_verdict = Verdict.WARNING
+            investigation_hints = [
+                f"Resolution selected {resolution_result.winning_track} after "
+                f"{resolution_result.iterations} iterations at stage "
+                f"{resolution_result.stage}"
+            ]
+        else:
+            overall_verdict = Verdict.PASS
+            investigation_hints = []
+
+        verdict = ConsensusVerdict(
+            verdict=overall_verdict,
+            comparisons=[],  # Stage comparisons are in stage_comparisons.json
+            boundary_warnings=[],
+            investigation_hints=investigation_hints,
+        )
+
+        # Save verdict
         verdict_path = consensus_dir / "verdict.json"
         verdict_path.write_text(verdict.model_dump_json(indent=2))
-        logger.info(f"Consensus verdict: {verdict.verdict.value}")
+        logger.info(f"Pipeline verdict: {verdict.verdict.value}")
 
-        # Record consensus step
-        duration = time.monotonic() - t0
+        # Record step state
         state.steps["consensus"] = StepState(
             name="consensus",
-            agent_type="ConsensusJudge",
+            agent_type="StageComparator",
             track="shared",
             status=StepStatus.COMPLETED,
             attempts=[
@@ -510,44 +644,22 @@ class PipelineOrchestrator:
         )
         state.current_step = "consensus"
         state.save(state_path)
-        if self.callback:
-            self.callback.on_step_complete("consensus", duration, 1)
 
-        # Handle verdict (PIPE-04)
+        # Handle HALT verdict
         if verdict.verdict == Verdict.HALT:
             state.status = "failed"
             state.save(state_path)
-            # Save diagnostic report (JUDG-06)
-            diag_path = consensus_dir / "diagnostic_report.json"
-            diag_path.write_text(
-                json.dumps(verdict.to_diagnostic_report(), indent=2)
-            )
-            logger.error(
-                f"CONSENSUS HALT: {verdict.investigation_hints}"
-            )
             raise ConsensusHaltError(verdict)
-
-        if verdict.verdict == Verdict.WARNING:
-            logger.warning(
-                f"CONSENSUS WARNING: proceeding with caution. "
-                f"Boundary warnings: {verdict.boundary_warnings}"
-            )
-            # Pipeline proceeds -- verdict.json in consensus_dir carries the
-            # flag for Phase 4 Medical Writer to read (JUDG-05 contract).
-            #
-            # Phase 4 contract (JUDG-05):
-            #   File: {output_dir}/consensus/verdict.json
-            #   Key: verdict (string: "PASS", "WARNING", or "HALT")
-            #   Key: boundary_warnings (list of strings, may be empty)
-            #   Key: comparisons (list of per-metric comparison objects)
-            #   Phase 4 should check verdict == "WARNING" and include
-            #   boundary_warnings in the report narrative when present.
 
         # === Step 4: Medical Writer (CSR generation) ===
         csr_dir = output_dir / "csr"
         csr_dir.mkdir(parents=True, exist_ok=True)
 
-        stats_dir = track_a_result.stats_dir
+        # Use winner's stats for Medical Writer (default Track A)
+        if resolution_result and resolution_result.winning_track:
+            stats_dir = output_dir / resolution_result.winning_track / "stats"
+        else:
+            stats_dir = output_dir / "track_a" / "stats"
 
         writer_agent = MedicalWriterAgent(
             llm=gemini, prompt_dir=prompt_dir, trial_config=self.settings.trial
