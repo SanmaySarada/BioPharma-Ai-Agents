@@ -98,10 +98,12 @@ Plans:
   3. Extracted values are validated against Pydantic bounds before writing
   4. User sees all extracted values for confirmation before config is written
 **Research**: Likely (prompt engineering for numeric extraction, LLM accuracy concerns)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 07-01: TBD
+- [ ] 07-01-PLAN.md — Extraction utilities (extract_json, extract_protocol_text) + ProtocolExtraction model + merge logic
+- [ ] 07-02-PLAN.md — LLM structured output (generate_structured on adapters) + ProtocolParserAgent + prompt template
+- [ ] 07-03-PLAN.md — parse-protocol CLI subcommand + Rich confirmation display + integration tests
 
 ## Progress
 
@@ -115,4 +117,4 @@ Phases execute in numeric order: 5 → 6 → 7
 | 3. Stderr Filtering & Error Classification | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 5. CSR Data Dictionary Extraction | v1.2 | 0/1 | Planned | - |
 | 6. Interactive Execution Mode | v1.2 | 0/1 | Planned | - |
-| 7. Protocol Parser Agent | v1.2 | 0/? | Not started | - |
+| 7. Protocol Parser Agent | v1.2 | 0/3 | Planned | - |
