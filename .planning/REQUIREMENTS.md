@@ -1,7 +1,7 @@
 # Requirements: omni-ai-agents
 
 **Defined:** 2026-02-12
-**Updated:** 2026-02-14 (v1.2 requirements merged)
+**Updated:** 2026-02-14 (v1.2 requirements merged, traceability updated)
 **Core Value:** Computational double programming for regulated biostatistics
 
 ## v1.1 Requirements
@@ -97,30 +97,30 @@ Which phases cover which requirements. Updated by create-roadmap.
 | ERRCLASS-03 | Phase 3 (v1.1) | Complete |
 | ERRDSP-01 | Phase 3 (v1.1) | Complete |
 | ERRDSP-02 | Phase 3 (v1.1) | Complete |
-| PARSE-01 | TBD | Pending |
-| PARSE-02 | TBD | Pending |
-| PARSE-03 | TBD | Pending |
-| PARSE-04 | TBD | Pending |
-| PARSE-05 | TBD | Pending |
-| DICT-01 | TBD | Pending |
-| DICT-02 | TBD | Pending |
-| DICT-03 | TBD | Pending |
-| DICT-04 | TBD | Pending |
-| DICT-05 | TBD | Pending |
-| INTER-01 | TBD | Pending |
-| INTER-02 | TBD | Pending |
-| INTER-03 | TBD | Pending |
-| INTER-04 | TBD | Pending |
-| INTER-05 | TBD | Pending |
-| INTER-06 | TBD | Pending |
+| DICT-01 | Phase 5 | Pending |
+| DICT-02 | Phase 5 | Pending |
+| DICT-03 | Phase 5 | Pending |
+| DICT-04 | Phase 5 | Pending |
+| DICT-05 | Phase 5 | Pending |
+| INTER-01 | Phase 6 | Pending |
+| INTER-02 | Phase 6 | Pending |
+| INTER-03 | Phase 6 | Pending |
+| INTER-04 | Phase 6 | Pending |
+| INTER-05 | Phase 6 | Pending |
+| INTER-06 | Phase 6 | Pending |
+| PARSE-01 | Phase 7 | Pending |
+| PARSE-02 | Phase 7 | Pending |
+| PARSE-03 | Phase 7 | Pending |
+| PARSE-04 | Phase 7 | Pending |
+| PARSE-05 | Phase 7 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 8 complete
-- v1.2 requirements: 16 pending
+- v1.2 requirements: 16 pending (all mapped)
 - Total v1 requirements: 24
-- Mapped to phases: 8
-- Unmapped: 16 (awaiting create-roadmap)
+- Mapped to phases: 24
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-14 after v1.2 requirements merge*
+*Last updated: 2026-02-14 after v1.2 roadmap creation*
