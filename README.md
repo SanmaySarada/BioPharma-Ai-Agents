@@ -337,18 +337,24 @@ Each agent's R code goes through a generate-validate-execute-retry loop:
    doesn't use disallowed functions
 3. **Docker execution** -- code runs in an isolated container with memory
    limits, CPU limits, network disabled, and a 5-minute timeout
-4. **Error classification** -- if execution fails, stderr is classified:
+4. **Stderr filtering** -- R packages (tidyverse, survminer) print verbose
+   loading messages to stderr that obscure real errors. A regex-based filter
+   strips package-attach noise, masking warnings, and tidyverse banners,
+   keeping only the actual error for classification and LLM feedback.
+5. **Error classification** -- the filtered stderr is classified:
    - Code bug or data path error: retried (error fed back to LLM)
    - Timeout: retried (LLM may generate simpler code)
    - Missing R package: not retried (Docker image needs fixing)
    - Statistical convergence failure: not retried (data issue)
-5. **Retry** -- up to 3 attempts. The LLM receives the previous error output
+6. **Retry** -- up to 3 attempts. The LLM receives the filtered error output
    as context, which resolves most code errors on the first retry.
 
 Prompt templates include defensive coding patterns for known R pitfalls --
 for example, the ADaM prompt warns that `min(integer(0), na.rm = TRUE)` returns
 `Inf` (not `NA`), and the Stats prompt includes data-cleaning preamble that
-filters `Inf`/`NA` rows before survival analysis.
+filters `Inf`/`NA` rows before survival analysis. The Stats prompt also
+documents the exact column names returned by `summary(survfit)$table` (e.g.,
+`"records"` not `"n"`) to prevent LLMs from guessing wrong accessor names.
 
 If all retries fail, the CLI displays a structured error panel identifying the
 agent, error class, message, and suggested fix.
@@ -371,8 +377,8 @@ its own container with:
   modify them
 - **Writable workspace** -- one directory per agent for output
 
-Track B's container mounts only the raw data directory. It physically cannot
-access Track A's SDTM, ADaM, or statistics directories.
+Each track's containers mount only the raw data directory plus that track's own
+upstream outputs. Neither track can access the other's files.
 
 ## Project Structure
 
@@ -411,9 +417,10 @@ src/omni_agents/
     consensus.py             # ConsensusJudge comparison logic
     resolution.py            # ResolutionLoop: diagnose, hint, cascade re-run
     retry.py                 # Error-feedback retry loop with classification
-    schema_validator.py      # SDTM/ADaM/Stats output validation
+    schema_validator.py      # SDTM/ADaM/Stats output validation + sanity checks
     script_cache.py          # SHA-256 keyed R script cache (track-aware)
     stage_comparator.py      # Per-stage comparison: SDTM, ADaM, Stats
+    stderr_filter.py         # R stderr noise removal (package loading, masking warnings)
     pre_execution.py         # Static R code analysis before Docker execution
     logging.py               # Loguru setup with structured JSONL and token logging
   templates/

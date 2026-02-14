@@ -1,9 +1,10 @@
-"""Tests for ADaM validation sanity checks (Inf trap detection).
+"""Tests for schema validator: ADaM sanity checks and output completeness.
 
 Verifies:
 - ADTTE with n_censored=0 raises SchemaValidationError
 - ADTTE with event rate > 95% raises SchemaValidationError
 - ADTTE with normal event rate passes validation
+- Output completeness checks for data_dictionary.csv (DICT-05)
 """
 
 import json
@@ -67,3 +68,59 @@ def test_adam_normal_event_rate_passes(tmp_path: Path) -> None:
 
     # Should not raise
     SchemaValidator.validate_adam(adam_dir, expected_subjects=300)
+
+
+# ---------------------------------------------------------------------------
+# Output completeness tests (DICT-05)
+# ---------------------------------------------------------------------------
+
+
+def test_output_completeness_passes_with_both_dicts(tmp_path: Path) -> None:
+    """Completeness check passes when both data dictionaries exist."""
+    track_dir = tmp_path / "track"
+    (track_dir / "sdtm").mkdir(parents=True)
+    (track_dir / "adam").mkdir(parents=True)
+    (track_dir / "sdtm" / "data_dictionary.csv").write_text("header\n")
+    (track_dir / "adam" / "data_dictionary.csv").write_text("header\n")
+
+    # Should not raise
+    SchemaValidator.validate_output_completeness(track_dir)
+
+
+def test_output_completeness_fails_missing_sdtm_dict(tmp_path: Path) -> None:
+    """Completeness check fails when SDTM data dictionary is missing."""
+    track_dir = tmp_path / "track"
+    (track_dir / "sdtm").mkdir(parents=True)
+    (track_dir / "adam").mkdir(parents=True)
+    (track_dir / "adam" / "data_dictionary.csv").write_text("header\n")
+
+    with pytest.raises(
+        SchemaValidationError, match="sdtm/data_dictionary.csv not found"
+    ):
+        SchemaValidator.validate_output_completeness(track_dir)
+
+
+def test_output_completeness_fails_missing_adam_dict(tmp_path: Path) -> None:
+    """Completeness check fails when ADaM data dictionary is missing."""
+    track_dir = tmp_path / "track"
+    (track_dir / "sdtm").mkdir(parents=True)
+    (track_dir / "adam").mkdir(parents=True)
+    (track_dir / "sdtm" / "data_dictionary.csv").write_text("header\n")
+
+    with pytest.raises(
+        SchemaValidationError, match="adam/data_dictionary.csv not found"
+    ):
+        SchemaValidator.validate_output_completeness(track_dir)
+
+
+def test_output_completeness_fails_missing_both(tmp_path: Path) -> None:
+    """Completeness check fails with 2 issues when both dictionaries missing."""
+    track_dir = tmp_path / "track"
+    (track_dir / "sdtm").mkdir(parents=True)
+    (track_dir / "adam").mkdir(parents=True)
+
+    with pytest.raises(SchemaValidationError) as exc_info:
+        SchemaValidator.validate_output_completeness(track_dir)
+
+    assert len(exc_info.value.issues) == 2
+    assert exc_info.value.agent == "OutputCompleteness"

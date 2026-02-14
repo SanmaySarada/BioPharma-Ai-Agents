@@ -55,6 +55,7 @@ from omni_agents.pipeline.retry import (
     NonRetriableError,
     execute_with_retry,
 )
+from omni_agents.pipeline.data_dictionary import write_adam_data_dictionary, write_sdtm_data_dictionary
 from omni_agents.pipeline.schema_validator import SchemaValidator
 from omni_agents.pipeline.script_cache import ScriptCache
 
@@ -318,6 +319,10 @@ class PipelineOrchestrator:
         SchemaValidator.validate_sdtm(sdtm_dir, self.settings.trial.n_subjects)
         logger.info(f"SDTM schema validation passed ({track_id})")
 
+        # Generate SDTM data dictionary (DICT-02, DICT-04)
+        write_sdtm_data_dictionary(sdtm_dir, self.settings.trial)
+        logger.info(f"SDTM data dictionary written ({track_id})")
+
         # === ADaM Agent ===
         adam_dir = track_dir / "adam"
         adam_dir.mkdir(parents=True, exist_ok=True)
@@ -347,6 +352,10 @@ class PipelineOrchestrator:
             self.callback.on_step_complete(f"adam_{track_id}", duration, len(adam_attempts))
         SchemaValidator.validate_adam(adam_dir, self.settings.trial.n_subjects)
         logger.info(f"ADaM schema validation passed ({track_id})")
+
+        # Generate ADaM data dictionary (DICT-03, DICT-04)
+        write_adam_data_dictionary(adam_dir, self.settings.trial)
+        logger.info(f"ADaM data dictionary written ({track_id})")
 
         # === Stats Agent ===
         stats_dir = track_dir / "stats"
@@ -382,6 +391,10 @@ class PipelineOrchestrator:
         SchemaValidator.validate_stats(stats_dir)
         logger.info(f"Stats schema validation passed ({track_id})")
 
+        # Validate all output artifacts are present (DICT-05)
+        SchemaValidator.validate_output_completeness(track_dir)
+        logger.info(f"Output completeness check passed ({track_id})")
+
         return TrackResult(
             track_id=track_id,
             sdtm_dir=sdtm_dir,
@@ -389,6 +402,26 @@ class PipelineOrchestrator:
             stats_dir=stats_dir,
             results_path=stats_dir / "results.json",
         )
+
+    async def _checkpoint(self, stage_name: str, summary: dict[str, str | list[str]]) -> None:
+        """Pause for user confirmation if callback supports interactive mode.
+
+        No-op when callback is None or is a plain ProgressCallback (non-interactive).
+        Only pauses when callback is an InteractiveCallback instance.
+
+        Args:
+            stage_name: Human-readable stage name for the summary panel.
+            summary: Key-value pairs to display (status, files, metrics).
+
+        Raises:
+            KeyboardInterrupt: If user aborts at checkpoint.
+        """
+        from omni_agents.display.callbacks import InteractiveCallback
+
+        if self.callback is not None and isinstance(self.callback, InteractiveCallback):
+            should_continue = await self.callback.on_checkpoint(stage_name, summary)
+            if not should_continue:
+                raise KeyboardInterrupt("User aborted at interactive checkpoint")
 
     async def run(self) -> Path:
         """Execute the full pipeline with symmetric parallel tracks and stage comparison.
@@ -467,6 +500,14 @@ class PipelineOrchestrator:
         self._validate_simulator_output(output_csv)
         logger.info("Simulator output validated")
 
+        # Interactive checkpoint: after simulator
+        await self._checkpoint("Simulator", {
+            "status": "Simulation complete",
+            "output_files": [str(output_csv)],
+            "metrics": f"{self.settings.trial.n_subjects} subjects, {self.settings.trial.visits} visits",
+            "next_stage": "Parallel Analysis (Track A + Track B)",
+        })
+
         # === Step 2: Fork -- parallel Track A and Track B (PIPE-03) ===
         openai = OpenAIAdapter(self.settings.llm.openai)
 
@@ -481,6 +522,21 @@ class PipelineOrchestrator:
         )
         t_parallel = time.monotonic() - t_start
         logger.info(f"Parallel execution completed in {t_parallel:.1f}s")
+
+        # Interactive checkpoint: after parallel tracks
+        await self._checkpoint("Parallel Analysis", {
+            "status": "Both tracks complete",
+            "duration": f"{t_parallel:.1f}s",
+            "output_files": [
+                str(track_a_result.sdtm_dir),
+                str(track_a_result.adam_dir),
+                str(track_a_result.stats_dir),
+                str(track_b_result.sdtm_dir),
+                str(track_b_result.adam_dir),
+                str(track_b_result.stats_dir),
+            ],
+            "next_stage": "Stage Comparison",
+        })
 
         # === Step 3: Stage-by-stage comparison (post-hoc, Strategy C from research) ===
         # Both tracks have completed in parallel. Now compare outputs at every stage.
@@ -644,6 +700,19 @@ class PipelineOrchestrator:
         )
         state.current_step = "consensus"
         state.save(state_path)
+
+        # Interactive checkpoint: after comparison (and resolution if triggered)
+        checkpoint_summary = {
+            "status": f"Verdict: {verdict.verdict.value}",
+            "output_files": [str(verdict_path), str(stage_comparisons_path)],
+            "next_stage": "Medical Writer (CSR Generation)",
+        }
+        if resolution_result is not None:
+            checkpoint_summary["resolution"] = (
+                f"{'Resolved' if resolution_result.resolved else 'Unresolved'} "
+                f"after {resolution_result.iterations} iteration(s)"
+            )
+        await self._checkpoint("Comparison & Resolution", checkpoint_summary)
 
         # Handle HALT verdict
         if verdict.verdict == Verdict.HALT:

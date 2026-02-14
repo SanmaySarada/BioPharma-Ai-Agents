@@ -4,7 +4,7 @@ You are an R programmer specializing in clinical trial statistical analysis. Gen
 You have access to ONLY these packages (pre-installed in the execution environment):
 - survival (Surv, survfit, coxph, survdiff)
 - survminer (ggsurvplot)
-- tidyverse (includes dplyr, tidyr, readr, ggplot2)
+- tidyverse (includes dplyr, tidyr, readr, ggplot2, stringr)
 - tableone (CreateTableOne)
 - jsonlite (toJSON, fromJSON, write_json)
 - broom (tidy, glance, augment)
@@ -104,6 +104,10 @@ Use these exact column names -- downstream consumers depend on them.
 # CRITICAL: Same 1 - CNSR inversion as in KM analysis
 cox_fit <- coxph(Surv(AVAL, 1 - CNSR) ~ ARM + AGE + SEX, data = adtte)
 cox_tidy <- broom::tidy(cox_fit, conf.int = TRUE, exponentiate = TRUE)
+
+# Extract ARM hazard ratio for results.json
+# Use grepl() (base R) -- do NOT use strata:: (that is a survival function, not a package)
+arm_row <- cox_tidy[grepl("^ARM", cox_tidy$term), ]
 ```
 
 Save to `table3_cox_results.csv` with these EXACT column names:
@@ -113,6 +117,8 @@ Save to `table3_cox_results.csv` with these EXACT column names:
 
 Rename broom output columns: estimate->hr, conf.low->ci_lower, conf.high->ci_upper, p.value->p_value.
 Use these exact column names -- downstream consumers depend on them.
+
+**IMPORTANT**: To filter cox results by term name, use base R `grepl("^ARM", term)`. Do NOT use `strata::` -- `strata` is a survival formula function, NOT a package. String functions come from `stringr` (part of tidyverse), e.g. `stringr::str_starts(term, "ARM")`, or just use base R `grepl()`.
 
 ## Output 4 -- Figure 1: Kaplan-Meier Plot
 
@@ -178,6 +184,7 @@ Produce a JSON file with this exact structure:
     "km_median_treatment": "<4 decimal string>",
     "km_median_placebo": "<4 decimal string>",
     "logrank_p": "<4 decimal string>",
+    "logrank_chisq": "<4 decimal string>",
     "cox_hr": "<4 decimal string>",
     "cox_ci_lower": "<4 decimal string>",
     "cox_ci_upper": "<4 decimal string>",

@@ -2,9 +2,12 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import TypeVar
 
 from jinja2 import Template
 from pydantic import BaseModel
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 class LLMResponse(BaseModel):
@@ -64,6 +67,30 @@ class BaseLLM(ABC):
 
         Raises:
             LLMError: If the underlying API call fails.
+        """
+
+    @abstractmethod
+    async def generate_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[_T],
+    ) -> _T:
+        """Generate a structured response conforming to a Pydantic model.
+
+        Uses the provider's native structured output API to constrain
+        the LLM response to match the given Pydantic schema.
+
+        Args:
+            system_prompt: System instruction for the LLM.
+            user_prompt: User message (e.g., protocol document text).
+            response_model: Pydantic model class the response must conform to.
+
+        Returns:
+            An instance of *response_model* populated by the LLM.
+
+        Raises:
+            LLMError: If the API call or response parsing fails.
         """
 
     def load_prompt_template(self, template_path: Path, **kwargs: object) -> str:

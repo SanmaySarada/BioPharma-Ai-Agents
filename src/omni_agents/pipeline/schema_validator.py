@@ -336,6 +336,38 @@ class SchemaValidator:
         )
 
     @classmethod
+    def validate_output_completeness(cls, track_dir: Path) -> None:
+        """Validate that all expected output artifacts exist in a track directory.
+
+        Called after all pipeline steps complete for a track. Checks for
+        data dictionary files alongside SDTM and ADaM outputs (DICT-05).
+
+        Args:
+            track_dir: Root track directory (e.g., output/track_a/).
+
+        Raises:
+            SchemaValidationError: If expected output files are missing.
+        """
+        issues: list[str] = []
+
+        sdtm_dict = track_dir / "sdtm" / "data_dictionary.csv"
+        if not sdtm_dict.exists():
+            issues.append(
+                "sdtm/data_dictionary.csv not found — SDTM data dictionary missing"
+            )
+
+        adam_dict = track_dir / "adam" / "data_dictionary.csv"
+        if not adam_dict.exists():
+            issues.append(
+                "adam/data_dictionary.csv not found — ADaM data dictionary missing"
+            )
+
+        if issues:
+            raise SchemaValidationError("OutputCompleteness", issues)
+
+        logger.info("Output completeness check passed: data dictionaries present")
+
+    @classmethod
     def validate_track_b(cls, track_b_dir: Path) -> None:
         """Validate Track B validation.json structure (DBLP-05).
 

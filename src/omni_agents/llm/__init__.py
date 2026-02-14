@@ -3,7 +3,7 @@
 from omni_agents.llm.base import BaseLLM, LLMError, LLMResponse
 from omni_agents.llm.gemini import GeminiAdapter
 from omni_agents.llm.openai_adapter import OpenAIAdapter
-from omni_agents.llm.response_parser import extract_r_code
+from omni_agents.llm.response_parser import extract_json, extract_r_code
 
 __all__ = [
     "BaseLLM",
@@ -11,5 +11,6 @@ __all__ = [
     "LLMError",
     "LLMResponse",
     "OpenAIAdapter",
+    "extract_json",
     "extract_r_code",
 ]

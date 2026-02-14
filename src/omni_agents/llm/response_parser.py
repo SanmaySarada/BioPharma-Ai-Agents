@@ -1,10 +1,11 @@
-"""R code extraction from markdown-fenced LLM responses.
+"""R code and JSON extraction from markdown-fenced LLM responses.
 
-LLMs typically return R code wrapped in markdown fences with explanatory text.
-This module reliably extracts the code blocks so the orchestrator can pass
-clean R scripts to the Docker execution engine.
+LLMs typically return R code or JSON wrapped in markdown fences with
+explanatory text.  This module reliably extracts code blocks and JSON
+objects so the orchestrator can pass clean data to downstream consumers.
 """
 
+import json
 import re
 
 # Matches fenced code blocks with optional ``r`` / ``R`` language tag.
@@ -75,5 +76,55 @@ def extract_r_code(response_text: str) -> str | None:
     stripped = response_text.strip()
     if contains_r_patterns(stripped):
         return stripped
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# JSON extraction from LLM responses
+# ---------------------------------------------------------------------------
+
+_JSON_BLOCK_RE = re.compile(r"```(?:json)?[^\S\n]*\n(.*?)\n```", re.DOTALL)
+
+
+def extract_json(response_text: str) -> dict | None:
+    """Extract a JSON object from an LLM response.
+
+    Handles:
+    1. JSON inside ``\u0060\u0060\u0060json ... \u0060\u0060\u0060`` fenced blocks.
+    2. JSON inside untagged ``\u0060\u0060\u0060 ... \u0060\u0060\u0060`` blocks.
+    3. Bare JSON object (starts with ``{``).
+    4. Returns ``None`` if no valid JSON found.
+
+    Args:
+        response_text: Raw text from LLM.
+
+    Returns:
+        Parsed dict, or ``None`` if no JSON found.
+    """
+    if not response_text or not response_text.strip():
+        return None
+
+    # Try fenced blocks first.
+    matches = _JSON_BLOCK_RE.findall(response_text)
+    for match in matches:
+        try:
+            parsed = json.loads(match)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    # Fallback: look for a bare JSON object in the text.
+    first_brace = response_text.find("{")
+    last_brace = response_text.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        candidate = response_text[first_brace : last_brace + 1]
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     return None

@@ -27,6 +27,83 @@ class TrialConfig(BaseModel):
     dropout_rate: float = 0.10
 
 
+class ProtocolExtraction(BaseModel):
+    """LLM extraction result.  ``None`` means 'not found in document'.
+
+    Every field mirrors :class:`TrialConfig` but is ``Optional`` with a
+    ``None`` default.  This lets us distinguish 'extracted value' from
+    'LLM did not find it' (PITFALL-04: defaults silently fill gaps).
+    """
+
+    n_subjects: int | None = None
+    randomization_ratio: str | None = None
+    seed: int | None = None
+    visits: int | None = None
+    endpoint: str | None = None
+    treatment_sbp_mean: float | None = None
+    treatment_sbp_sd: float | None = None
+    placebo_sbp_mean: float | None = None
+    placebo_sbp_sd: float | None = None
+    baseline_sbp_mean: float | None = None
+    baseline_sbp_sd: float | None = None
+    age_mean: float | None = None
+    age_sd: float | None = None
+    missing_rate: float | None = None
+    dropout_rate: float | None = None
+
+
+class ExtractionResult(BaseModel):
+    """Result of merging extraction with defaults.
+
+    Tracks which fields came from the document vs TrialConfig defaults.
+    """
+
+    config: TrialConfig
+    extracted_fields: list[str]  # field names found in document
+    defaulted_fields: list[str]  # field names that fell back to defaults
+
+
+def merge_extraction(
+    extraction: ProtocolExtraction,
+    defaults: TrialConfig | None = None,
+) -> ExtractionResult:
+    """Merge LLM extraction with TrialConfig defaults.
+
+    For each :class:`ProtocolExtraction` field:
+
+    - If not ``None``: use extracted value, record in ``extracted_fields``.
+    - If ``None``: use :class:`TrialConfig` default, record in
+      ``defaulted_fields``.
+
+    Args:
+        extraction: LLM extraction result with Optional fields.
+        defaults: Base TrialConfig to fill gaps.  Uses ``TrialConfig()``
+            if ``None``.
+
+    Returns:
+        :class:`ExtractionResult` with merged config and field tracking.
+    """
+    base = defaults or TrialConfig()
+    overrides: dict[str, object] = {}
+    extracted_fields: list[str] = []
+    defaulted_fields: list[str] = []
+
+    for field_name in ProtocolExtraction.model_fields:
+        value = getattr(extraction, field_name)
+        if value is not None:
+            overrides[field_name] = value
+            extracted_fields.append(field_name)
+        else:
+            defaulted_fields.append(field_name)
+
+    final = base.model_copy(update=overrides)
+    return ExtractionResult(
+        config=final,
+        extracted_fields=extracted_fields,
+        defaulted_fields=defaulted_fields,
+    )
+
+
 class DockerConfig(BaseModel):
     """Docker execution environment settings."""
 

@@ -1,9 +1,14 @@
 """OpenAI GPT-4 async LLM adapter using the official openai SDK."""
 
+from typing import TypeVar
+
 from openai import APIError, AsyncOpenAI
+from pydantic import BaseModel
 
 from omni_agents.config import OpenAIConfig
 from omni_agents.llm.base import BaseLLM, LLMError, LLMResponse
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 class OpenAIAdapter(BaseLLM):
@@ -71,3 +76,59 @@ class OpenAIAdapter(BaseLLM):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+
+    async def generate_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[_T],
+    ) -> _T:
+        """Generate structured output using OpenAI's beta parse API.
+
+        Uses ``client.beta.chat.completions.parse()`` with ``response_format``
+        set to the Pydantic model.  Falls back to manual JSON parsing via
+        :func:`extract_json` if SDK parsing returns ``None``.
+
+        Args:
+            system_prompt: System message for the model.
+            user_prompt: User message / task description.
+            response_model: Pydantic model class for structured output.
+
+        Returns:
+            An instance of *response_model* populated by the LLM.
+
+        Raises:
+            LLMError: If the OpenAI API call or parsing fails.
+        """
+        try:
+            completion = await self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self.temperature,
+                response_format=response_model,
+            )
+        except APIError as exc:
+            raise LLMError(
+                provider="openai",
+                message=f"Structured generation failed: {exc}",
+                original_error=exc,
+            ) from exc
+
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            # Fallback: try manual JSON parsing from content.
+            from omni_agents.llm.response_parser import extract_json
+
+            raw_text = completion.choices[0].message.content or ""
+            data = extract_json(raw_text)
+            if data is None:
+                raise LLMError(
+                    provider="openai",
+                    message="Structured output parsing returned None",
+                )
+            return response_model.model_validate(data)
+
+        return parsed  # type: ignore[return-value]

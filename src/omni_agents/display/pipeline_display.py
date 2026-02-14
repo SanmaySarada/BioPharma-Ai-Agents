@@ -147,10 +147,15 @@ class PipelineDisplay(ProgressCallback):
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Start the Live display (interactive mode only)."""
-        self._progress = self._build_progress()
-        self._track_a_task = self._progress.add_task("Track A", total=3)
-        self._track_b_task = self._progress.add_task("Track B", total=3)
+        """Start the Live display (interactive mode only).
+
+        Safe to call multiple times -- Progress instances and task IDs are
+        created only once. Subsequent calls restart only the Live context.
+        """
+        if self._progress is None:
+            self._progress = self._build_progress()
+            self._track_a_task = self._progress.add_task("Track A", total=3)
+            self._track_b_task = self._progress.add_task("Track B", total=3)
 
         if self._interactive:
             from rich.live import Live

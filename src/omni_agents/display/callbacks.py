@@ -124,3 +124,31 @@ class ProgressCallback(Protocol):
             iterations: Total resolution iterations performed.
         """
         ...
+
+
+@runtime_checkable
+class InteractiveCallback(ProgressCallback, Protocol):
+    """Extended callback protocol for interactive execution mode.
+
+    Adds checkpoint support to ProgressCallback. The orchestrator calls
+    on_checkpoint() at stage boundaries when running in interactive mode.
+    Non-interactive callbacks do not implement this and are unaffected.
+    """
+
+    async def on_checkpoint(
+        self,
+        stage_name: str,
+        summary: dict[str, str | list[str]],
+    ) -> bool:
+        """Called at interactive pause points between pipeline stages.
+
+        Args:
+            stage_name: Human-readable name of the completed stage
+                (e.g., "Simulator", "Parallel Analysis", "Stage Comparison").
+            summary: Dict with keys like "status", "duration", "output_files",
+                "metrics" -- contents vary per stage.
+
+        Returns:
+            True to continue pipeline execution, False to abort.
+        """
+        ...

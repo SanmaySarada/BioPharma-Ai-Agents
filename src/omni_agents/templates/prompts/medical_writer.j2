@@ -68,7 +68,7 @@ Write 3-4 paragraphs using body_add_fpar() with fpar() containing:
 Include n_subjects from metadata, n_events, n_censored. Reference Table 1 (demographics).
 
 **Paragraph 2 -- Kaplan-Meier Analysis (CSR-03 cross-reference to Table 2):**
-Report KM median times from display section, log-rank p-value. Use run_reference("bkm_table2") to cross-reference Table 2. Use run_reference("bkm_figure1") to cross-reference Figure 1.
+Report KM median times from display section, log-rank chi-squared statistic (results$display$logrank_chisq) and p-value (results$display$logrank_p). Use run_reference("bkm_table2") to cross-reference Table 2. Use run_reference("bkm_figure1") to cross-reference Figure 1.
 
 **Paragraph 3 -- Cox Model (CSR-03 cross-reference to Table 3):**
 Report hazard ratio, 95% CI, p-value from display section. Use run_reference("bkm_table3") to cross-reference Table 3.
@@ -169,46 +169,9 @@ doc <- body_add_img(doc, src = "KM_PLOT_PATH", width = 6, height = 4.5)
 
 Width = 6 inches and height = 4.5 inches for standard letter page with margins.
 
-### Section 8: Data Dictionary -- ADTTE Variables (CSR-04)
+### Note: No Data Dictionary Section
 
-Add a section explaining the derivation of key ADTTE variables. This is domain knowledge -- include these EXACT descriptions:
-
-```r
-doc <- body_add_par(doc, "Data Dictionary: ADTTE Variable Derivations", style = "heading 2")
-
-dict_data <- data.frame(
-  Variable = c("USUBJID", "ARM", "ARMCD", "AGE", "SEX", "AVAL", "CNSR", "STARTDT", "EVNTDESC", "SRCDOM"),
-  Label = c(
-    "Unique Subject Identifier",
-    "Treatment Arm (Treatment / Placebo)",
-    "Arm Code (TRT / PBO)",
-    "Age at Baseline (years)",
-    "Sex (M / F)",
-    "Analysis Value: Time to Event (weeks)",
-    "Censoring Flag (0 = event occurred, 1 = censored)",
-    "Time-to-Event Start Date (first dose date)",
-    "Event Description",
-    "Source Domain (VS)"
-  ),
-  Derivation = c(
-    "Carried from DM domain",
-    "Carried from DM domain randomization",
-    "Derived from ARM",
-    "Carried from DM domain",
-    "Carried from DM domain",
-    "Weeks from first dose to first SBP < {{ event_threshold }} mmHg. If no event, weeks from first dose to dropout or Week 26 (study end).",
-    "0 if subject had SBP < {{ event_threshold }} mmHg at any post-baseline visit. 1 if subject completed study or dropped out without reaching the threshold.",
-    "Date of first dose (Visit 1 / Week 0)",
-    "SBP < {{ event_threshold }} mmHg event or censored at last observation",
-    "Vital Signs (VS) domain -- source of SBP measurements"
-  ),
-  stringsAsFactors = FALSE
-)
-ft_dict <- flextable(dict_data)
-ft_dict <- theme_vanilla(ft_dict)
-ft_dict <- autofit(ft_dict)
-doc <- body_add_flextable(doc, ft_dict)
-```
+Do NOT include a data dictionary or variable derivations section in the CSR. The data dictionary is generated as a separate standalone file (data_dictionary.csv) alongside the data files. The CSR should end after Figure 1.
 
 ## Save Document
 
@@ -231,9 +194,7 @@ Use `print(doc, target = ...)` -- this is the officer method for saving a docx o
 
 5. **WARNING HANDLING**: Check verdict$verdict. If "WARNING", add a cautionary note section with the boundary_warnings content. If "PASS", skip the section.
 
-6. **DATA DICTIONARY (CSR-04)**: Include the data dictionary section with ADTTE variable derivations as specified above. This is required regulatory content explaining how analysis variables were derived from source data.
-
-7. **TABLE1 CSV**: Use check.names = FALSE and row.names = NULL when reading table1_demographics.csv. The first column is unnamed row names from tableone -- rename it to "Characteristic". Remove the "p" and "test" columns before passing to flextable.
+6. **TABLE1 CSV**: Use check.names = FALSE and row.names = NULL when reading table1_demographics.csv. The first column is unnamed row names from tableone -- rename it to "Characteristic". Remove the "p" and "test" columns before passing to flextable.
 
 ## Important Notes
 

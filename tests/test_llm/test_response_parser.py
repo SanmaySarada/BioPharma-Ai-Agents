@@ -1,9 +1,10 @@
-"""Tests for R code extraction from LLM responses."""
+"""Tests for R code and JSON extraction from LLM responses."""
 
 import pytest
 
 from omni_agents.llm.response_parser import (
     contains_r_patterns,
+    extract_json,
     extract_r_code,
 )
 
@@ -246,3 +247,61 @@ class TestContainsRPatterns:
     )
     def test_rejects_non_r(self, text: str) -> None:
         assert contains_r_patterns(text) is False
+
+
+# ---------------------------------------------------------------------------
+# extract_json
+# ---------------------------------------------------------------------------
+
+
+class TestExtractJson:
+    """Tests for JSON extraction from LLM responses."""
+
+    def test_json_in_fenced_block(self) -> None:
+        response = '```json\n{"n_subjects": 300}\n```'
+        result = extract_json(response)
+        assert result == {"n_subjects": 300}
+
+    def test_json_in_untagged_block(self) -> None:
+        response = '```\n{"key": "value"}\n```'
+        result = extract_json(response)
+        assert result == {"key": "value"}
+
+    def test_bare_json_object(self) -> None:
+        response = 'Here is the data: {"x": 1, "y": 2} hope that helps'
+        result = extract_json(response)
+        assert result == {"x": 1, "y": 2}
+
+    def test_json_with_surrounding_text(self) -> None:
+        response = (
+            "I analyzed the protocol and extracted the following:\n\n"
+            '```json\n{"n_subjects": 500, "endpoint": "SBP"}\n```\n\n'
+            "Let me know if you need anything else."
+        )
+        result = extract_json(response)
+        assert result == {"n_subjects": 500, "endpoint": "SBP"}
+
+    def test_nested_json(self) -> None:
+        response = '```json\n{"trial": {"arms": ["treatment", "placebo"]}, "n": 300}\n```'
+        result = extract_json(response)
+        assert result == {"trial": {"arms": ["treatment", "placebo"]}, "n": 300}
+
+    def test_no_json_returns_none(self) -> None:
+        response = "This is just plain text with no JSON content at all."
+        assert extract_json(response) is None
+
+    def test_empty_string_returns_none(self) -> None:
+        assert extract_json("") is None
+
+    def test_invalid_json_in_fence_returns_none(self) -> None:
+        response = '```json\n{invalid json content here\n```'
+        assert extract_json(response) is None
+
+    def test_multiple_json_blocks_returns_first(self) -> None:
+        response = (
+            '```json\n{"first": true}\n```\n'
+            "Some text in between.\n"
+            '```json\n{"second": true}\n```'
+        )
+        result = extract_json(response)
+        assert result == {"first": True}
