@@ -68,10 +68,10 @@ Plans:
   3. `adam/data_dictionary.csv` exists alongside ADaM data files with variable definitions
   4. Schema validator confirms data dictionary files are present in output
 **Research**: Unlikely (standard patterns, no LLM needed)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md — Deterministic data dictionary generation + template cleanup + schema validator
 
 ### Phase 6: Interactive Execution Mode
 **Goal**: Users can review pipeline output step-by-step before each stage proceeds
@@ -113,6 +113,6 @@ Phases execute in numeric order: 5 → 6 → 7
 | 1. Symmetric Double Programming | v1.0 | 3/3 | Complete | 2026-02-12 |
 | 2. Display Layer Update | v1.0 | 1/1 | Complete | 2026-02-12 |
 | 3. Stderr Filtering & Error Classification | v1.1 | 2/2 | Complete | 2026-02-12 |
-| 5. CSR Data Dictionary Extraction | v1.2 | 0/? | Not started | - |
+| 5. CSR Data Dictionary Extraction | v1.2 | 0/1 | Planned | - |
 | 6. Interactive Execution Mode | v1.2 | 0/? | Not started | - |
 | 7. Protocol Parser Agent | v1.2 | 0/? | Not started | - |
