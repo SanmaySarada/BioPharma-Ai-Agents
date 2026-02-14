@@ -83,10 +83,10 @@ Plans:
   3. User presses Enter to continue or Ctrl+C to abort at each pause
   4. Rich Live display remains functional after pausing and resuming
 **Research**: Unlikely (Rich Live stop/start proven in codebase, asyncio patterns well-documented)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 06-01: TBD
+- [ ] 06-01-PLAN.md — InteractiveCallback protocol + display + orchestrator checkpoints + CLI flag
 
 ### Phase 7: Protocol Parser Agent
 **Goal**: Users can generate pipeline config from a natural-language protocol document
@@ -114,5 +114,5 @@ Phases execute in numeric order: 5 → 6 → 7
 | 2. Display Layer Update | v1.0 | 1/1 | Complete | 2026-02-12 |
 | 3. Stderr Filtering & Error Classification | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 5. CSR Data Dictionary Extraction | v1.2 | 0/1 | Planned | - |
-| 6. Interactive Execution Mode | v1.2 | 0/? | Not started | - |
+| 6. Interactive Execution Mode | v1.2 | 0/1 | Planned | - |
 | 7. Protocol Parser Agent | v1.2 | 0/? | Not started | - |
