@@ -1,6 +1,7 @@
-# Requirements: omni-ai-agents v1.1
+# Requirements: omni-ai-agents
 
 **Defined:** 2026-02-12
+**Updated:** 2026-02-14 (v1.2 requirements merged)
 **Core Value:** Computational double programming for regulated biostatistics
 
 ## v1.1 Requirements
@@ -22,24 +23,65 @@
 - [x] **ERRDSP-01**: Show actual R error in terminal error panel and pipeline logs, not truncated package loading noise
 - [x] **ERRDSP-02**: Ensure the 500-char truncation window contains the real error by filtering noise before truncation
 
-### Pipeline Resilience
+## v1.2 Requirements
 
-- [ ] **RESIL-01**: Catch per-track exceptions in `asyncio.gather()` so one track failure does not crash the other
-- [ ] **RESIL-02**: If one track fails, continue pipeline with the surviving track's results
-- [ ] **RESIL-03**: Display failed track status in pipeline display (step marked as failed, progress bar updated)
-- [ ] **RESIL-04**: Degrade gracefully to single-track mode: skip stage comparison, proceed to Medical Writer with surviving track
+### Protocol Parser
+
+- [ ] **PARSE-01**: User can provide a .docx protocol document and receive a structured config.yaml
+- [ ] **PARSE-02**: Parser extracts trial parameters (n_subjects, randomization_ratio, baseline values, etc.) into TrialConfig format
+- [ ] **PARSE-03**: Parser validates extracted values against Pydantic model bounds and types
+- [ ] **PARSE-04**: Parser displays all extracted values for user confirmation before writing config
+- [ ] **PARSE-05**: New `parse-protocol` CLI subcommand accepts .docx input path and config output path
+
+### CSR Data Dictionary
+
+- [ ] **DICT-01**: Data dictionary section removed from CSR Word document template
+- [ ] **DICT-02**: SDTM data_dictionary.csv generated in sdtm/ output directory with columns: Variable, Label, Type, Derivation
+- [ ] **DICT-03**: ADaM data_dictionary.csv generated in adam/ output directory with columns: Variable, Label, Type, Derivation
+- [ ] **DICT-04**: Data dictionaries generated deterministically by orchestrator (no LLM call)
+- [ ] **DICT-05**: Schema validator checks for data_dictionary.csv presence in output directories
+
+### Interactive Mode
+
+- [ ] **INTER-01**: `--interactive` CLI flag enables stage-level pause mode
+- [ ] **INTER-02**: Pipeline pauses after each logical stage (simulator, parallel analysis, comparison, resolution, reporting)
+- [ ] **INTER-03**: Rich Panel summary displayed at each pause point showing step name, metrics, output files, and validation status
+- [ ] **INTER-04**: User presses Enter to continue or Ctrl+C to abort at each pause
+- [ ] **INTER-05**: Interactive input handled via asyncio run_in_executor (non-blocking event loop)
+- [ ] **INTER-06**: Rich Live display properly stops and restarts around interactive pause points
 
 ## v2 Requirements
 
-None deferred from v1.1.
+### Protocol Parser Enhancements
+
+- **PARSE-V2-01**: Source quoting — show which part of the document each parameter came from
+- **PARSE-V2-02**: Interactive Q&A mode for ambiguous parameters
+
+### Interactive Mode Enhancements
+
+- **INTER-V2-01**: Step-level pauses within parallel tracks (finer granularity)
+- **INTER-V2-02**: Step selection (`--steps sdtm,adam`) for partial pipeline runs
+
+### Pipeline Resilience (carried from v1.1)
+
+- **RESIL-01**: Catch per-track exceptions in asyncio.gather() so one track failure does not crash the other
+- **RESIL-02**: If one track fails, continue pipeline with the surviving track's results
+- **RESIL-03**: Display failed track status in pipeline display (step marked as failed, progress bar updated)
+- **RESIL-04**: Degrade gracefully to single-track mode: skip stage comparison, proceed to Medical Writer with surviving track
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Smarter `_pick_best_track` heuristic | Deferred to v2.0 — not related to reliability |
-| Schema validator integration in resolution hints | Deferred to v2.0 — not related to reliability |
-| Suppressing R package loading at Docker/Rscript level | Would change Docker execution contract; filtering in Python is safer and more maintainable |
+| Define-XML generation | Disproportionate complexity for simulation pipeline |
+| Dual-LLM protocol parsing | Protocol parsing is deterministic extraction, not adversarial |
+| Protocol parser that edits config.yaml in-place | Risk of corrupting user comments/formatting |
+| Auto-detection of protocol file format (.pdf, .txt, .rtf) | Support .docx only (industry standard) |
+| Interactive mode with rollback | Requires checkpoint/restore infrastructure |
+| Data dictionary in JSON format | CSV is consistent with data file format |
+| Smarter `_pick_best_track` heuristic | Deferred to v2.0 — not related to usability |
+| Schema validator integration in resolution hints | Deferred to v2.0 |
+| Suppressing R package loading at Docker/Rscript level | Filtering in Python is safer and more maintainable |
 
 ## Traceability
 
@@ -47,24 +89,38 @@ Which phases cover which requirements. Updated by create-roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STDERR-01 | Phase 3 | Complete |
-| STDERR-02 | Phase 3 | Complete |
-| STDERR-03 | Phase 3 | Complete |
-| ERRCLASS-01 | Phase 3 | Complete |
-| ERRCLASS-02 | Phase 3 | Complete |
-| ERRCLASS-03 | Phase 3 | Complete |
-| ERRDSP-01 | Phase 3 | Complete |
-| ERRDSP-02 | Phase 3 | Complete |
-| RESIL-01 | Phase 4 | Pending |
-| RESIL-02 | Phase 4 | Pending |
-| RESIL-03 | Phase 4 | Pending |
-| RESIL-04 | Phase 4 | Pending |
+| STDERR-01 | Phase 3 (v1.1) | Complete |
+| STDERR-02 | Phase 3 (v1.1) | Complete |
+| STDERR-03 | Phase 3 (v1.1) | Complete |
+| ERRCLASS-01 | Phase 3 (v1.1) | Complete |
+| ERRCLASS-02 | Phase 3 (v1.1) | Complete |
+| ERRCLASS-03 | Phase 3 (v1.1) | Complete |
+| ERRDSP-01 | Phase 3 (v1.1) | Complete |
+| ERRDSP-02 | Phase 3 (v1.1) | Complete |
+| PARSE-01 | TBD | Pending |
+| PARSE-02 | TBD | Pending |
+| PARSE-03 | TBD | Pending |
+| PARSE-04 | TBD | Pending |
+| PARSE-05 | TBD | Pending |
+| DICT-01 | TBD | Pending |
+| DICT-02 | TBD | Pending |
+| DICT-03 | TBD | Pending |
+| DICT-04 | TBD | Pending |
+| DICT-05 | TBD | Pending |
+| INTER-01 | TBD | Pending |
+| INTER-02 | TBD | Pending |
+| INTER-03 | TBD | Pending |
+| INTER-04 | TBD | Pending |
+| INTER-05 | TBD | Pending |
+| INTER-06 | TBD | Pending |
 
 **Coverage:**
-- v1.1 requirements: 12 total
-- Mapped to phases: 12
-- Unmapped: 0 ✓
+- v1.1 requirements: 8 complete
+- v1.2 requirements: 16 pending
+- Total v1 requirements: 24
+- Mapped to phases: 8
+- Unmapped: 16 (awaiting create-roadmap)
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-12 after Phase 3 completion*
+*Last updated: 2026-02-14 after v1.2 requirements merge*
