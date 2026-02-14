@@ -6,9 +6,10 @@ analysis, independently validates results using a second LLM, and produces a
 Clinical Study Report -- all from a single command.
 
 The core idea: two different language models (Gemini and GPT-4) independently
-analyze the same trial data through separate code paths. A deterministic
-Consensus Judge compares their statistical results. If the models disagree
-beyond metric-specific tolerances, the pipeline halts. This catches errors that
+run the full analysis pipeline through separate code paths. Both tracks
+produce SDTM, ADaM, and Stats outputs, which are compared stage-by-stage. When
+tracks disagree, an adversarial resolution loop diagnoses which track erred,
+provides targeted hints, and retries -- automatically. This catches errors that
 any single model would miss -- a computational analog to the double programming
 requirement in regulated biostatistics.
 
@@ -99,27 +100,34 @@ llm:
     api_key: $OPENAI_API_KEY
     model: "gpt-4o"
     temperature: 0.0
+
+resolution:
+  enabled: true              # attempt automated resolution on disagreement
+  max_iterations: 2          # max retry cycles before halting or picking best
 ```
 
 Changing any trial parameter invalidates the script cache, so the next run will
 call the LLMs again to regenerate R code for the new configuration.
 
+Set `resolution.enabled: false` to halt immediately on any stage disagreement
+instead of attempting automated resolution.
+
 ## Pipeline Architecture
 
-The pipeline has 7 agent steps organized into 4 stages. Each agent is a
+The pipeline has 9 agent steps organized into 5 stages. Each agent is a
 stateless worker: it receives context, calls an LLM to generate R code, and the
 orchestrator executes that code in a sandboxed Docker container.
 
 ```
-Stage 1           Stage 2                        Stage 3           Stage 4
-Simulation        Analysis                       Validation        Reporting
-                  (parallel)                     (sequential)      (sequential)
+Stage 1           Stage 2                        Stage 3            Stage 4          Stage 5
+Simulation        Analysis                       Comparison         Resolution       Reporting
+                  (parallel)                     (sequential)       (if needed)      (sequential)
 
                +--[SDTM]--[ADaM]--[Stats]--+
                |       Track A (Gemini)     |
-[Simulator] ---+                            +---[Consensus]------[Medical Writer]
-               |       Track B (GPT-4)      |     Judge
-               +--[Double Programmer]-------+
+[Simulator] ---+                            +---[Stage          ---[Resolution]----[Medical Writer]
+               |       Track B (GPT-4)      |    Comparator]       Loop
+               +--[SDTM]--[ADaM]--[Stats]--+
 ```
 
 ### Stage 1: Data Generation
@@ -137,18 +145,19 @@ Simulation        Analysis                       Validation        Reporting
 
 ### Stage 2: Parallel Analysis
 
-Track A and Track B execute simultaneously via `asyncio.gather()`. Docker volume
-mounts enforce physical isolation -- Track B cannot access any Track A files.
+Track A and Track B execute simultaneously via `asyncio.gather()`. Both tracks
+run the identical three-agent pipeline (SDTM, ADaM, Stats) but with different
+LLMs generating different R code. Docker volume mounts enforce physical
+isolation -- neither track can access the other's files.
 
-#### Track A (Gemini) -- Full Regulatory Pipeline
-
-Three agents run sequentially, each reading the previous agent's output:
+Each track runs three agents sequentially, each reading the previous agent's
+output:
 
 **SDTM Agent** maps raw data to CDISC Study Data Tabulation Model format.
 
 - Input: `raw/SBPdata.csv`
-- Output: `track_a/sdtm/DM.csv` (Demographics, 300 rows, 12 CDISC columns) and
-  `track_a/sdtm/VS.csv` (Vital Signs, 7,800 rows, 12 CDISC columns)
+- Output: `{track}/sdtm/DM.csv` (Demographics, 300 rows, 12 CDISC columns) and
+  `{track}/sdtm/VS.csv` (Vital Signs, 7,800 rows, 12 CDISC columns)
 - Schema validation checks column names, controlled terminology (VSTESTCD, RACE,
   SEX values), row counts, and referential integrity (every VS subject exists in
   DM)
@@ -156,12 +165,14 @@ Three agents run sequentially, each reading the previous agent's output:
 **ADaM Agent** derives the Analysis Data Model for time-to-event analysis.
 
 - Input: SDTM DM.csv and VS.csv
-- Output: `track_a/adam/ADTTE.rds` (time-to-event dataset) and
-  `track_a/adam/ADTTE_summary.json` (machine-readable validation sidecar)
+- Output: `{track}/adam/ADTTE.rds` (time-to-event dataset) and
+  `{track}/adam/ADTTE_summary.json` (machine-readable validation sidecar)
 - Event definition: first post-baseline visit where SBP drops below 120 mmHg.
   Patients who never reach this threshold or who drop out are censored.
 - Schema validation checks row count matches n_subjects, PARAMCD is correct,
-  event + censored counts sum to total subjects
+  event + censored counts sum to total subjects, n_censored is non-zero (catches
+  `min(empty, na.rm=TRUE)` returning `Inf` being misclassified as an event),
+  and event rate is below 95% (flags implausible upstream derivations)
 
 **Stats Agent** runs the survival analysis.
 
@@ -179,21 +190,27 @@ Three agents run sequentially, each reading the previous agent's output:
 - Schema validation checks all expected files exist and results.json has
   required fields
 
-#### Track B (GPT-4) -- Independent Validation
+Track A uses Gemini; Track B uses GPT-4. The same agent code runs for both --
+the orchestrator's generic `_run_track` method parameterizes by track ID and
+LLM, ensuring identical pipeline structure with independent code generation.
 
-**Double Programmer Agent** replicates the key statistical results from scratch.
+### Stage 3: Stage Comparison
 
-- Input: only `raw/SBPdata.csv` (no access to SDTM, ADaM, or Track A stats)
-- Output: `track_b/validation.json` with `validator_p_value`, `validator_hr`,
-  and metadata (n_subjects, n_events, n_censored)
-- GPT-4 generates its own R code to independently calculate the log-rank
-  p-value and Cox hazard ratio directly from raw data
-- Docker volume mounts ensure Track B physically cannot read Track A outputs
+**StageComparator** is a deterministic comparison module (no LLM call). It
+compares Track A and Track B outputs at every pipeline stage:
 
-### Stage 3: Consensus
+**SDTM comparison** checks:
+- Row counts for DM and VS datasets
+- Column sets match between tracks
+- Subject ID overlap
+- ARM, SEX, and RACE distribution alignment
 
-**Consensus Judge** is a deterministic comparison module (no LLM call). It
-compares Track A and Track B on five metrics with specific tolerances:
+**ADaM comparison** checks:
+- Row count, event count, censored count
+- PARAMCD values match
+- Column sets match
+
+**Stats comparison** uses tolerance-based matching:
 
 | Metric | Tolerance | Type |
 |--------|-----------|------|
@@ -202,26 +219,46 @@ compares Track A and Track B on five metrics with specific tolerances:
 | n_censored | must match exactly | exact |
 | log-rank p-value | +/- 0.001 | absolute |
 | Cox hazard ratio | +/- 0.1% | relative |
+| KM median (treatment) | +/- 0.5 | absolute |
+| KM median (placebo) | +/- 0.5 | absolute |
+
+Output: `consensus/stage_comparisons.json` with per-stage results.
+
+### Stage 4: Resolution (if needed)
+
+When stage comparison finds a disagreement, the **ResolutionLoop** activates:
+
+1. **Diagnose** -- deterministic heuristic identifies which track likely erred
+   (e.g., the track with fewer rows is probably wrong)
+2. **Generate hint** -- creates a structured hint with the specific discrepancies
+   and stage-appropriate suggested checks
+3. **Retry** -- the failing track re-runs from the disagreeing stage with the
+   hint injected via the error-feedback mechanism. Downstream stages cascade
+   (e.g., fixing SDTM triggers ADaM and Stats re-runs)
+4. **Re-compare** -- StageComparator runs again on the new outputs
+
+This repeats up to `max_iterations` (default: 2). If resolution succeeds, the
+pipeline proceeds. If it fails, the system either selects the best track or
+halts.
 
 Verdict logic:
 
-- **PASS** -- all metrics within tolerance. Pipeline proceeds.
+- **PASS** -- all stages agree within tolerance. Pipeline proceeds.
 - **WARNING** -- metrics are within tolerance but a p-value straddles a
   significance boundary (e.g., 0.045 vs 0.055). Pipeline proceeds with a
   caution flag embedded in the CSR.
-- **HALT** -- any metric outside tolerance. Pipeline stops and writes a
-  diagnostic report with per-metric values, differences, and investigation
-  hints. This means the two models produced meaningfully different statistical
-  results from the same data, indicating a code generation error.
+- **HALT** -- disagreement persists after resolution. Pipeline stops and writes
+  a diagnostic report.
 
-Output: `consensus/verdict.json`
+Output: `consensus/verdict.json`, `consensus/stage_comparisons.json`,
+`consensus/resolution_log.json` (if resolution triggered)
 
-### Stage 4: Reporting
+### Stage 5: Reporting
 
 **Medical Writer Agent** (Gemini) generates the Clinical Study Report.
 
-- Input: `track_a/stats/results.json`, all three CSV tables, `km_plot.png`, and
-  `consensus/verdict.json`
+- Input: winning track's `stats/results.json`, all three CSV tables,
+  `km_plot.png`, and `consensus/verdict.json`
 - LLM generates R code using the `officer` and `flextable` packages to produce
   a Word document
 - Output: `csr/clinical_study_report.docx` containing:
@@ -259,9 +296,24 @@ output/20260211_074448/
       results.json           # full-precision statistics
       script.R
   track_b/
-    validation.json          # GPT-4 independent results
-    script.R
+    sdtm/
+      DM.csv                 # independent SDTM from GPT-4
+      VS.csv
+      script.R
+    adam/
+      ADTTE.rds              # independent ADaM from GPT-4
+      ADTTE_summary.json
+      script.R
+    stats/
+      table1_demographics.csv
+      table2_km_results.csv
+      table3_cox_results.csv
+      km_plot.png
+      results.json           # independent statistics from GPT-4
+      script.R
   consensus/
+    stage_comparisons.json   # per-stage comparison results
+    resolution_log.json      # resolution attempts (if triggered)
     verdict.json             # PASS / WARNING / HALT
   csr/
     clinical_study_report.docx  # final regulatory document
@@ -293,12 +345,18 @@ Each agent's R code goes through a generate-validate-execute-retry loop:
 5. **Retry** -- up to 3 attempts. The LLM receives the previous error output
    as context, which resolves most code errors on the first retry.
 
+Prompt templates include defensive coding patterns for known R pitfalls --
+for example, the ADaM prompt warns that `min(integer(0), na.rm = TRUE)` returns
+`Inf` (not `NA`), and the Stats prompt includes data-cleaning preamble that
+filters `Inf`/`NA` rows before survival analysis.
+
 If all retries fail, the CLI displays a structured error panel identifying the
 agent, error class, message, and suggested fix.
 
 R scripts are cached on first successful generation. Cache keys are derived
-from the trial configuration hash and agent name, so any config change produces
-a cache miss.
+from the trial configuration hash, agent name, and track ID, so any config
+change produces a cache miss. Track-aware keys prevent Track A and Track B from
+colliding in the cache.
 
 ## Docker Isolation
 
@@ -328,11 +386,11 @@ src/omni_agents/
     sdtm.py                  # CDISC SDTM mapping
     adam.py                   # ADaM time-to-event derivation
     stats.py                 # Survival analysis (KM, Cox, demographics)
-    double_programmer.py     # Independent GPT-4 validation
+    double_programmer.py     # (deprecated) Legacy single-agent validation
     medical_writer.py        # CSR document generation
   display/
-    callbacks.py             # ProgressCallback protocol (7 lifecycle hooks)
-    pipeline_display.py      # Rich Live terminal UI
+    callbacks.py             # ProgressCallback protocol (9 lifecycle hooks)
+    pipeline_display.py      # Rich Live terminal UI (9 pipeline steps)
     error_display.py         # Structured error panels
   docker/
     engine.py                # Docker SDK wrapper (image build, container lifecycle)
@@ -346,13 +404,16 @@ src/omni_agents/
     consensus.py             # ConsensusVerdict, MetricComparison models
     execution.py             # DockerResult, AgentAttempt, ErrorClassification
     pipeline.py              # PipelineState, StepState for audit trail
+    resolution.py            # TrackResult, StageComparison, ResolutionHint, ResolutionResult
     schemas.py               # CDISC column definitions and validation constants
   pipeline/
-    orchestrator.py          # Main pipeline DAG: fork, gather, consensus gate
+    orchestrator.py          # Main pipeline DAG: symmetric fork, compare, resolve, report
     consensus.py             # ConsensusJudge comparison logic
+    resolution.py            # ResolutionLoop: diagnose, hint, cascade re-run
     retry.py                 # Error-feedback retry loop with classification
     schema_validator.py      # SDTM/ADaM/Stats output validation
-    script_cache.py          # SHA-256 keyed R script cache
+    script_cache.py          # SHA-256 keyed R script cache (track-aware)
+    stage_comparator.py      # Per-stage comparison: SDTM, ADaM, Stats
     pre_execution.py         # Static R code analysis before Docker execution
     logging.py               # Loguru setup with structured JSONL and token logging
   templates/
@@ -361,7 +422,7 @@ src/omni_agents/
       sdtm.j2                # Jinja2 prompt for CDISC SDTM mapping
       adam.j2                # Jinja2 prompt for ADaM derivation
       stats.j2               # Jinja2 prompt for survival analysis
-      double_programmer.j2   # Jinja2 prompt for independent validation
+      double_programmer.j2   # (deprecated) Legacy validation prompt
       medical_writer.j2      # Jinja2 prompt for CSR generation
 docker/
   r-clinical/
@@ -394,7 +455,3 @@ ruff check src/
 mypy src/omni_agents/
 pytest
 ```
-
-## License
-
-MIT

@@ -98,6 +98,12 @@ This JSON file is used for Python-side validation. It MUST be produced alongside
 6. **DUAL OUTPUT**: BOTH ADTTE.rds AND ADTTE_summary.json must be written. The JSON summary
    is required for pipeline validation.
 
+7. **Inf FROM AGGREGATION**: R's `min()` and `max()` return `Inf` / `-Inf` when given
+   an empty vector with `na.rm = TRUE`. For example, `min(integer(0), na.rm = TRUE)`
+   returns `Inf`, NOT `NA`. When checking whether a subject had an event, use
+   `is.finite(event_visit)` instead of `!is.na(event_visit)`. The value `Inf` means
+   "no event found" and the subject should be CENSORED, not treated as an event.
+
 ## Important Notes
 - Do NOT call set.seed() -- the seed is injected externally for reproducibility
 - Print summary to stdout: n_rows, n_events, n_censored

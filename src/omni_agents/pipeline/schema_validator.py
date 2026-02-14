@@ -234,6 +234,25 @@ class SchemaValidator:
                 f"({summary.n_censored}) = {total}, expected {expected_subjects}"
             )
 
+        # Sanity check: with dropout_rate > 0, having 0 censored subjects is implausible
+        if summary.n_censored == 0:
+            issues.append(
+                "ADTTE: n_censored is 0 — all subjects classified as events. "
+                "This likely indicates a bug in event detection logic "
+                "(e.g., min(empty, na.rm=TRUE) returning Inf treated as an event). "
+                "Expected some censored subjects given dropout rate."
+            )
+
+        # Sanity check: event rate above 95% is suspicious for this trial design
+        if summary.n_rows > 0:
+            event_rate = summary.n_events / summary.n_rows
+            if event_rate > 0.95:
+                issues.append(
+                    f"ADTTE: event rate is {event_rate:.1%} ({summary.n_events}/{summary.n_rows}). "
+                    f"Rate above 95% is suspicious — check for Inf in AVAL from "
+                    f"min(empty_vector, na.rm=TRUE) being treated as an event."
+                )
+
         # Column check
         actual_cols = set(summary.columns)
         issues.extend(

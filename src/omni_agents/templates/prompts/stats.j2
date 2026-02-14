@@ -63,6 +63,9 @@ Create a survival object and compute Kaplan-Meier estimates:
 ```r
 adtte <- readRDS("path/ADTTE.rds")
 
+# Defensive: remove rows with Inf or NA in survival columns
+adtte <- adtte[is.finite(adtte$AVAL) & !is.na(adtte$CNSR) & !is.na(adtte$ARM), ]
+
 # CRITICAL: CNSR inversion -- CDISC CNSR=0 is event, R Surv() status=1 is event
 surv_obj <- Surv(time = adtte$AVAL, event = 1 - adtte$CNSR)
 
@@ -71,7 +74,19 @@ logrank <- survdiff(surv_obj ~ ARM, data = adtte)
 logrank_p <- 1 - pchisq(logrank$chisq, df = 1)
 ```
 
-Extract KM medians from `summary(km_fit)$table`.
+Extract KM medians from `summary(km_fit)$table`. This returns a matrix with columns:
+`records`, `n.max`, `n.start`, `events`, `*rmean`, `*se(rmean)`, `median`, `0.95LCL`, `0.95UCL`.
+There is NO column called `"n"` — use `"records"` for subject counts and `"events"` for event counts.
+
+```r
+km_summary <- summary(km_fit)$table
+# Extract per-stratum values:
+km_records  <- km_summary[, "records"]
+km_events   <- km_summary[, "events"]
+km_medians  <- km_summary[, "median"]
+km_lcl      <- km_summary[, "0.95LCL"]
+km_ucl      <- km_summary[, "0.95UCL"]
+```
 
 Save to `table2_km_results.csv` with these EXACT column names:
 - `strata` -- stratum label (e.g. "ARM=Placebo", "ARM=Treatment")
@@ -186,6 +201,14 @@ Use `jsonlite::write_json(results, "path/results.json", auto_unbox = TRUE, digit
 5. **CSV DUAL COLUMNS**: All table CSV files (table2, table3) should include both display-rounded and unrounded columns so that reviewers can see formatted values while preserving exact numbers.
 
 6. **RISK TABLE**: The KM plot MUST include `risk.table = TRUE` for the number-at-risk table below the x-axis. This is a regulatory expectation.
+
+7. **DATA VALIDATION**: Before running any survival analysis, validate the ADTTE data:
+   - Check for Inf values: `adtte <- adtte[is.finite(adtte$AVAL), ]`
+   - Check for NA values: `adtte <- adtte[!is.na(adtte$AVAL) & !is.na(adtte$CNSR), ]`
+   - Verify both events and censored subjects exist: `stopifnot(sum(adtte$CNSR == 0) > 0, sum(adtte$CNSR == 1) > 0)`
+   If the data has zero censored subjects or Inf in AVAL, the upstream ADaM derivation
+   has a bug. Print a clear error message describing the issue rather than letting
+   survdiff crash with a cryptic message.
 
 ## Important Notes
 
