@@ -117,3 +117,42 @@ def test_adam_data_dictionary_derivation_text_not_empty(tmp_path: Path) -> None:
         assert row["Derivation"].strip(), (
             f"Empty Derivation for variable {row['Variable']}"
         )
+
+
+def test_adam_data_dictionary_contains_adsl_variables(tmp_path: Path) -> None:
+    """ADaM data dictionary contains ADSL population flags and treatment vars."""
+    write_adam_data_dictionary(tmp_path, TrialConfig())
+    with open(tmp_path / "data_dictionary.csv") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    variables = [row["Variable"] for row in rows]
+    for var in (
+        "TRT01P", "TRT01A", "SAFFL", "ITTFL", "EFFFL",
+        "TRTSDT", "TRTEDT", "TRTDUR", "EOSSTT", "DCSREAS",
+        "AGEGR1", "AGEU",
+    ):
+        assert var in variables, f"Missing ADSL variable: {var}"
+
+
+def test_adam_data_dictionary_adtte_derivation_references_adsl(tmp_path: Path) -> None:
+    """ADTTE variable derivations reference ADSL, not DM directly."""
+    write_adam_data_dictionary(tmp_path, TrialConfig())
+    with open(tmp_path / "data_dictionary.csv") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    # Find ADTTE AGE/SEX/ARM/ARMCD derivations (the ones that should say "from ADSL")
+    # There are two sets: one for ADSL (from DM) and one for ADTTE (from ADSL)
+    # The ADTTE ones appear after PARAMCD and should reference ADSL
+    adtte_vars_from_adsl = []
+    seen_adtte_section = False
+    for row in rows:
+        if row["Variable"] == "PARAMCD":
+            seen_adtte_section = True
+        if seen_adtte_section and row["Variable"] in ("AGE", "SEX", "ARM", "ARMCD"):
+            adtte_vars_from_adsl.append(row)
+    assert len(adtte_vars_from_adsl) >= 4, "Expected AGE, SEX, ARM, ARMCD in ADTTE section"
+    for row in adtte_vars_from_adsl:
+        assert "ADSL" in row["Derivation"], (
+            f"ADTTE {row['Variable']} derivation should reference ADSL, "
+            f"got: {row['Derivation']}"
+        )
