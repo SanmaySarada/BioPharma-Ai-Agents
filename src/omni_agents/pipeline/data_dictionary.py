@@ -188,9 +188,10 @@ def write_sdtm_data_dictionary(sdtm_dir: Path, trial_config: TrialConfig) -> Pat
 
 
 def write_adam_data_dictionary(adam_dir: Path, trial_config: TrialConfig) -> Path:
-    """Write ADaM ADTTE variable definitions to adam/data_dictionary.csv.
+    """Write ADaM ADSL and ADTTE variable definitions to adam/data_dictionary.csv.
 
-    Covers ADTTE dataset variables produced by the ADaM agent.
+    Covers ADSL subject-level and ADTTE time-to-event dataset variables
+    produced by the ADaM agent.
 
     Args:
         adam_dir: Track's adam/ output directory (e.g., output/track_a/adam/).
@@ -202,6 +203,136 @@ def write_adam_data_dictionary(adam_dir: Path, trial_config: TrialConfig) -> Pat
     event_threshold = int(trial_config.treatment_sbp_mean)
 
     rows = [
+        # ADSL variables
+        {
+            "Variable": "STUDYID",
+            "Label": "Study Identifier",
+            "Type": "Char",
+            "Derivation": "Fixed study identifier",
+        },
+        {
+            "Variable": "USUBJID",
+            "Label": "Unique Subject Identifier",
+            "Type": "Char",
+            "Derivation": "From DM domain",
+        },
+        {
+            "Variable": "SUBJID",
+            "Label": "Subject Identifier for Study",
+            "Type": "Char",
+            "Derivation": "From DM domain",
+        },
+        {
+            "Variable": "AGE",
+            "Label": "Age at Baseline",
+            "Type": "Num",
+            "Derivation": "From DM domain",
+        },
+        {
+            "Variable": "AGEU",
+            "Label": "Age Units",
+            "Type": "Char",
+            "Derivation": 'Fixed: "YEARS"',
+        },
+        {
+            "Variable": "AGEGR1",
+            "Label": "Age Group 1",
+            "Type": "Char",
+            "Derivation": '"<65" if AGE < 65, ">=65" otherwise',
+        },
+        {
+            "Variable": "SEX",
+            "Label": "Sex",
+            "Type": "Char",
+            "Derivation": "From DM domain (M/F)",
+        },
+        {
+            "Variable": "RACE",
+            "Label": "Race",
+            "Type": "Char",
+            "Derivation": "From DM domain, CDISC controlled terminology",
+        },
+        {
+            "Variable": "ARM",
+            "Label": "Planned Treatment Arm",
+            "Type": "Char",
+            "Derivation": "From DM domain (Treatment/Placebo)",
+        },
+        {
+            "Variable": "ARMCD",
+            "Label": "Planned Arm Code",
+            "Type": "Char",
+            "Derivation": "From DM domain (TRT/PBO)",
+        },
+        {
+            "Variable": "TRT01P",
+            "Label": "Planned Treatment for Period 01",
+            "Type": "Char",
+            "Derivation": "Set equal to ARM (no crossover in this study)",
+        },
+        {
+            "Variable": "TRT01A",
+            "Label": "Actual Treatment for Period 01",
+            "Type": "Char",
+            "Derivation": "Set equal to ARM (no crossover in this study)",
+        },
+        {
+            "Variable": "SAFFL",
+            "Label": "Safety Population Flag",
+            "Type": "Char",
+            "Derivation": '"Y" for all randomized subjects',
+        },
+        {
+            "Variable": "ITTFL",
+            "Label": "Intent-to-Treat Population Flag",
+            "Type": "Char",
+            "Derivation": '"Y" for all randomized subjects',
+        },
+        {
+            "Variable": "EFFFL",
+            "Label": "Efficacy Population Flag",
+            "Type": "Char",
+            "Derivation": '"Y" if subject has >= 1 post-baseline VS observation',
+        },
+        {
+            "Variable": "TRTSDT",
+            "Label": "Date of First Exposure to Treatment",
+            "Type": "Num",
+            "Derivation": "0 (baseline week)",
+        },
+        {
+            "Variable": "TRTEDT",
+            "Label": "Date of Last Exposure to Treatment",
+            "Type": "Num",
+            "Derivation": (
+                "Last observed visit number from VS "
+                "(accounting for dropout)"
+            ),
+        },
+        {
+            "Variable": "TRTDUR",
+            "Label": "Duration of Treatment (Weeks)",
+            "Type": "Num",
+            "Derivation": "TRTEDT - TRTSDT",
+        },
+        {
+            "Variable": "EOSSTT",
+            "Label": "End of Study Status",
+            "Type": "Char",
+            "Derivation": (
+                f'"COMPLETED" if last visit == {trial_config.visits - 1}, '
+                f'"DISCONTINUED" if dropped out'
+            ),
+        },
+        {
+            "Variable": "DCSREAS",
+            "Label": "Reason for Discontinuation",
+            "Type": "Char",
+            "Derivation": (
+                'Empty string if completed, "Dropout" if discontinued'
+            ),
+        },
+        # ADTTE variables
         {
             "Variable": "STUDYID",
             "Label": "Study Identifier",
@@ -261,25 +392,25 @@ def write_adam_data_dictionary(adam_dir: Path, trial_config: TrialConfig) -> Pat
             "Variable": "AGE",
             "Label": "Age at Baseline",
             "Type": "Num",
-            "Derivation": "Carried from DM domain via left_join on USUBJID",
+            "Derivation": "Carried from ADSL via merge on USUBJID",
         },
         {
             "Variable": "SEX",
             "Label": "Sex",
             "Type": "Char",
-            "Derivation": "Carried from DM domain via left_join on USUBJID",
+            "Derivation": "Carried from ADSL via merge on USUBJID",
         },
         {
             "Variable": "ARM",
             "Label": "Planned Arm",
             "Type": "Char",
-            "Derivation": "Carried from DM domain via left_join on USUBJID",
+            "Derivation": "Carried from ADSL via merge on USUBJID",
         },
         {
             "Variable": "ARMCD",
             "Label": "Planned Arm Code",
             "Type": "Char",
-            "Derivation": "Carried from DM domain via left_join on USUBJID",
+            "Derivation": "Carried from ADSL via merge on USUBJID",
         },
     ]
 

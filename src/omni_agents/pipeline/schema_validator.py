@@ -12,12 +12,14 @@ from pathlib import Path
 from loguru import logger
 
 from omni_agents.models.schemas import (
+    REQUIRED_ADSL_COLS,
     REQUIRED_ADTTE_COLS,
     REQUIRED_DM_COLS,
     REQUIRED_VS_COLS,
     STATS_EXPECTED_FILES,
     VALID_RACE,
     VALID_SEX,
+    ADSLSummary,
     ADTTESummary,
 )
 
@@ -182,18 +184,17 @@ class SchemaValidator:
         adam_dir: Path,
         expected_subjects: int,
     ) -> None:
-        """Validate ADaM ADTTE dataset via its JSON summary.
+        """Validate ADaM ADSL and ADTTE datasets via their JSON summaries.
 
         Checks:
-        - ADTTE.rds file exists
-        - ADTTE_summary.json exists and parses into ADTTESummary
-        - Row count matches expected subjects
-        - Events + censored == total subjects
-        - Required ADTTE columns present
-        - PARAMCD == "TTESB120"
+        - ADSL.csv and ADSL_summary.json exist and validate
+        - ADTTE.rds and ADTTE_summary.json exist and validate
+        - Row counts match expected subjects
+        - Required columns present in both datasets
+        - PARAMCD == "TTESB120" for ADTTE
 
         Args:
-            adam_dir: Directory containing ADTTE.rds and ADTTE_summary.json.
+            adam_dir: Directory containing ADSL/ADTTE files and summaries.
             expected_subjects: Expected number of unique subjects.
 
         Raises:
@@ -201,6 +202,43 @@ class SchemaValidator:
         """
         issues: list[str] = []
 
+        # --- ADSL checks ---
+        adsl_csv_path = adam_dir / "ADSL.csv"
+        adsl_summary_path = adam_dir / "ADSL_summary.json"
+
+        if not adsl_csv_path.exists():
+            issues.append("ADSL.csv not found in ADaM output directory")
+        if not adsl_summary_path.exists():
+            issues.append(
+                "ADSL_summary.json not found in ADaM output directory"
+            )
+
+        # Parse ADSL summary if both files exist
+        if adsl_csv_path.exists() and adsl_summary_path.exists():
+            try:
+                adsl_raw = json.loads(adsl_summary_path.read_text())
+                adsl_summary = ADSLSummary(**adsl_raw)
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                issues.append(f"ADSL_summary.json parse error: {e}")
+                adsl_summary = None
+
+            if adsl_summary is not None:
+                # Row count (one row per subject)
+                if adsl_summary.n_rows != expected_subjects:
+                    issues.append(
+                        f"ADSL: expected {expected_subjects} rows "
+                        f"(one per subject), got {adsl_summary.n_rows}"
+                    )
+
+                # Column check
+                adsl_actual = set(adsl_summary.columns)
+                issues.extend(
+                    cls._check_columns(
+                        adsl_actual, REQUIRED_ADSL_COLS, "ADSL"
+                    )
+                )
+
+        # --- ADTTE checks ---
         rds_path = adam_dir / "ADTTE.rds"
         summary_path = adam_dir / "ADTTE_summary.json"
 
@@ -209,8 +247,10 @@ class SchemaValidator:
         if not summary_path.exists():
             issues.append("ADTTE_summary.json not found in ADaM output directory")
 
-        if issues:
-            raise SchemaValidationError("ADaM", issues)
+        # If ADTTE files are missing, raise now with all collected issues
+        if not rds_path.exists() or not summary_path.exists():
+            if issues:
+                raise SchemaValidationError("ADaM", issues)
 
         # Parse summary JSON
         try:
@@ -269,8 +309,9 @@ class SchemaValidator:
             raise SchemaValidationError("ADaM", issues)
 
         logger.info(
-            "ADaM validation passed: {} rows, {} events, {} censored, "
-            "PARAMCD={}",
+            "ADaM validation passed: ADSL={} rows, ADTTE={} rows, "
+            "{} events, {} censored, PARAMCD={}",
+            expected_subjects,
             summary.n_rows,
             summary.n_events,
             summary.n_censored,
@@ -362,10 +403,18 @@ class SchemaValidator:
                 "adam/data_dictionary.csv not found — ADaM data dictionary missing"
             )
 
+        adsl_csv = track_dir / "adam" / "ADSL.csv"
+        if not adsl_csv.exists():
+            issues.append(
+                "adam/ADSL.csv not found — ADSL subject-level dataset missing"
+            )
+
         if issues:
             raise SchemaValidationError("OutputCompleteness", issues)
 
-        logger.info("Output completeness check passed: data dictionaries present")
+        logger.info(
+            "Output completeness check passed: data dictionaries and ADSL present"
+        )
 
     @classmethod
     def validate_track_b(cls, track_b_dir: Path) -> None:
