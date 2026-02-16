@@ -5,7 +5,7 @@ patient data, transforms it to CDISC regulatory standards, runs survival
 analysis, independently validates results using a second LLM, and produces a
 Clinical Study Report -- all from a single command.
 
-The core idea: two different language models (Gemini and GPT-4) independently
+The core idea: two different language models (Gemini and o3) independently
 run the full analysis pipeline through separate code paths. Both tracks
 produce SDTM, ADaM, and Stats outputs, which are compared stage-by-stage. When
 tracks disagree, an adversarial resolution loop diagnoses which track erred,
@@ -48,16 +48,43 @@ directly into `config.yaml`.
 ## Running
 
 ```
-python -m omni_agents.cli --config config.yaml
+omni-agents run --config config.yaml
 ```
 
-Or use the installed entry point:
+Or use the module entry point:
 
 ```
-omni-agents --config config.yaml
+python -m omni_agents.cli run --config config.yaml
 ```
 
-The first run builds a Docker image (`omni-r-clinical:latest`) with R 4.5 and
+### Interactive Mode
+
+Add `--interactive` (or `-i`) to pause between major pipeline stages for
+step-by-step review:
+
+```
+omni-agents run --config config.yaml --interactive
+```
+
+The pipeline pauses after the Simulator, after parallel track completion, and
+after stage comparison/resolution. At each checkpoint you can inspect outputs
+before continuing.
+
+### Protocol Extraction
+
+Extract trial parameters directly from a `.docx` protocol document:
+
+```
+omni-agents parse-protocol protocol.docx -o config.yaml
+```
+
+This reads the document, uses Gemini to extract trial parameters (n_subjects,
+randomization ratio, endpoint, SBP distributions, dropout rate, etc.), displays
+the extracted values alongside any defaults, and writes a ready-to-use
+`config.yaml`. Fields not found in the protocol fall back to defaults and are
+flagged.
+
+The first run builds a Docker image (`omni-r-clinical:latest`) with R 4.5.2 and
 all required statistical packages. This takes a few minutes. Subsequent runs
 reuse the cached image.
 
@@ -98,7 +125,7 @@ llm:
     temperature: 0.0
   openai:
     api_key: $OPENAI_API_KEY
-    model: "gpt-4o"
+    model: "o3"
     temperature: 0.0
 
 resolution:
@@ -126,7 +153,7 @@ Simulation        Analysis                       Comparison         Resolution  
                +--[SDTM]--[ADaM]--[Stats]--+
                |       Track A (Gemini)     |
 [Simulator] ---+                            +---[Stage          ---[Resolution]----[Medical Writer]
-               |       Track B (GPT-4)      |    Comparator]       Loop
+               |       Track B (o3)         |    Comparator]       Loop
                +--[SDTM]--[ADaM]--[Stats]--+
 ```
 
@@ -161,18 +188,35 @@ output:
 - Schema validation checks column names, controlled terminology (VSTESTCD, RACE,
   SEX values), row counts, and referential integrity (every VS subject exists in
   DM)
+- Per-dataset data dictionaries are generated for DM and VS
 
-**ADaM Agent** derives the Analysis Data Model for time-to-event analysis.
+**ADaM Agent** derives the Analysis Data Model datasets.
 
 - Input: SDTM DM.csv and VS.csv
-- Output: `{track}/adam/ADTTE.rds` (time-to-event dataset) and
-  `{track}/adam/ADTTE_summary.json` (machine-readable validation sidecar)
+- Output:
+  - `{track}/adam/ADSL.csv` -- subject-level analysis dataset (one row per
+    subject with demographics, treatment variables, population flags, and
+    disposition)
+  - `{track}/adam/ADSL_summary.json` -- machine-readable ADSL validation sidecar
+  - `{track}/adam/ADTTE.rds` -- time-to-event dataset for R consumption by Stats
+  - `{track}/adam/ADTTE.xlsx` -- time-to-event dataset for human review
+  - `{track}/adam/ADTTE_summary.json` -- machine-readable ADTTE validation sidecar
+- ADSL is constructed first and saved before ADTTE. ADTTE merges subject-level
+  variables from the in-memory ADSL dataframe (not DM directly)
 - Event definition: first post-baseline visit where SBP drops below 120 mmHg.
   Patients who never reach this threshold or who drop out are censored.
-- Schema validation checks row count matches n_subjects, PARAMCD is correct,
-  event + censored counts sum to total subjects, n_censored is non-zero (catches
-  `min(empty, na.rm=TRUE)` returning `Inf` being misclassified as an event),
-  and event rate is below 95% (flags implausible upstream derivations)
+- Schema validation checks:
+  - ADSL row count matches n_subjects, required columns present
+  - EFFFL (Efficacy Population Flag) distribution: flags if all subjects are
+    marked "Y", which indicates a derivation bug since dropouts should have no
+    post-baseline data
+  - ADTTE row count, PARAMCD, event + censored totals
+  - n_censored > 0 (catches `min(empty, na.rm=TRUE)` returning `Inf` being
+    misclassified as an event)
+  - Event rate below 95% (flags implausible upstream derivations)
+- Per-dataset data dictionaries are generated for ADSL and ADTTE
+- Output completeness gate verifies all data dictionaries, ADSL.csv, and
+  ADTTE.xlsx are present before proceeding
 
 **Stats Agent** runs the survival analysis.
 
@@ -190,9 +234,13 @@ output:
 - Schema validation checks all expected files exist and results.json has
   required fields
 
-Track A uses Gemini; Track B uses GPT-4. The same agent code runs for both --
+Track A uses Gemini; Track B uses o3. The same agent code runs for both --
 the orchestrator's generic `_run_track` method parameterizes by track ID and
 LLM, ensuring identical pipeline structure with independent code generation.
+
+The OpenAI adapter automatically uses the `developer` message role (instead of
+`system`) for o3-series reasoning models, ensuring prompt instructions receive
+full priority.
 
 ### Stage 3: Stage Comparison
 
@@ -244,11 +292,11 @@ halts.
 Verdict logic:
 
 - **PASS** -- all stages agree within tolerance. Pipeline proceeds.
-- **WARNING** -- metrics are within tolerance but a p-value straddles a
-  significance boundary (e.g., 0.045 vs 0.055). Pipeline proceeds with a
+- **WARNING** -- resolution selected a winning track after exhausting iterations
+  but tracks still disagree. Pipeline proceeds with the winner's outputs and a
   caution flag embedded in the CSR.
-- **HALT** -- disagreement persists after resolution. Pipeline stops and writes
-  a diagnostic report.
+- **HALT** -- disagreement persists and no winner could be determined. Pipeline
+  stops and writes a diagnostic report.
 
 Output: `consensus/verdict.json`, `consensus/stage_comparisons.json`,
 `consensus/resolution_log.json` (if resolution triggered)
@@ -259,16 +307,15 @@ Output: `consensus/verdict.json`, `consensus/stage_comparisons.json`,
 
 - Input: winning track's `stats/results.json`, all three CSV tables,
   `km_plot.png`, and `consensus/verdict.json`
-- LLM generates R code using the `officer` and `flextable` packages to produce
-  a Word document
+- LLM generates R code using the `officer`, `flextable`, `jsonlite`, and `readr`
+  packages to produce a Word document
 - Output: `csr/clinical_study_report.docx` containing:
   - Narrative summary of study results with statistical interpretations
   - Tables 1-3 formatted as flextables
   - KM plot embedded as an image
   - Internal cross-references linking cited statistics to their source tables
-  - Data dictionary explaining ADTTE variable derivations
   - If consensus verdict was WARNING, the report includes the caution flag and
-    boundary warnings
+    investigation hints
 
 ## Output Structure
 
@@ -283,10 +330,17 @@ output/20260211_074448/
     sdtm/
       DM.csv                 # CDISC Demographics (300 rows)
       VS.csv                 # CDISC Vital Signs (7,800 rows)
+      DM_data_dictionary.csv # DM variable definitions
+      VS_data_dictionary.csv # VS variable definitions
       script.R
     adam/
-      ADTTE.rds              # time-to-event dataset
-      ADTTE_summary.json     # validation sidecar
+      ADSL.csv               # subject-level analysis dataset (300 rows)
+      ADSL_summary.json      # ADSL validation sidecar
+      ADSL_data_dictionary.csv  # ADSL variable definitions
+      ADTTE.rds              # time-to-event dataset (R format)
+      ADTTE.xlsx             # time-to-event dataset (Excel)
+      ADTTE_summary.json     # ADTTE validation sidecar
+      ADTTE_data_dictionary.csv # ADTTE variable definitions
       script.R
     stats/
       table1_demographics.csv
@@ -297,19 +351,26 @@ output/20260211_074448/
       script.R
   track_b/
     sdtm/
-      DM.csv                 # independent SDTM from GPT-4
+      DM.csv                 # independent SDTM from o3
       VS.csv
+      DM_data_dictionary.csv
+      VS_data_dictionary.csv
       script.R
     adam/
-      ADTTE.rds              # independent ADaM from GPT-4
+      ADSL.csv               # independent ADSL from o3
+      ADSL_summary.json
+      ADSL_data_dictionary.csv
+      ADTTE.rds              # independent ADaM from o3
+      ADTTE.xlsx
       ADTTE_summary.json
+      ADTTE_data_dictionary.csv
       script.R
     stats/
       table1_demographics.csv
       table2_km_results.csv
       table3_cox_results.csv
       km_plot.png
-      results.json           # independent statistics from GPT-4
+      results.json           # independent statistics from o3
       script.R
   consensus/
     stage_comparisons.json   # per-stage comparison results
@@ -384,19 +445,22 @@ upstream outputs. Neither track can access the other's files.
 
 ```
 src/omni_agents/
-  cli.py                     # Typer CLI entry point
+  cli.py                     # Typer CLI entry point (run + parse-protocol)
   config.py                  # Pydantic settings (YAML + env var resolution)
   agents/
     base.py                  # BaseAgent ABC: prompt loading, code generation
     simulator.py             # Synthetic data generation
     sdtm.py                  # CDISC SDTM mapping
-    adam.py                   # ADaM time-to-event derivation
+    adam.py                  # ADaM ADSL + ADTTE derivation
     stats.py                 # Survival analysis (KM, Cox, demographics)
-    double_programmer.py     # (deprecated) Legacy single-agent validation
     medical_writer.py        # CSR document generation
+    protocol_parser.py       # Protocol document extraction (parse-protocol)
+    docx_reader.py           # .docx text extraction utility
+    double_programmer.py     # (deprecated) Legacy single-agent validation
   display/
     callbacks.py             # ProgressCallback protocol (9 lifecycle hooks)
     pipeline_display.py      # Rich Live terminal UI (9 pipeline steps)
+    interactive_display.py   # Interactive mode with checkpoint pauses
     error_display.py         # Structured error panels
   docker/
     engine.py                # Docker SDK wrapper (image build, container lifecycle)
@@ -404,7 +468,7 @@ src/omni_agents/
   llm/
     base.py                  # BaseLLM abstract class and LLMResponse model
     gemini.py                # Google Gemini adapter
-    openai_adapter.py        # OpenAI GPT-4 adapter
+    openai_adapter.py        # OpenAI o3 adapter (developer role for reasoning models)
     response_parser.py       # R code extraction from LLM markdown responses
   models/
     consensus.py             # ConsensusVerdict, MetricComparison models
@@ -417,23 +481,25 @@ src/omni_agents/
     consensus.py             # ConsensusJudge comparison logic
     resolution.py            # ResolutionLoop: diagnose, hint, cascade re-run
     retry.py                 # Error-feedback retry loop with classification
-    schema_validator.py      # SDTM/ADaM/Stats output validation + sanity checks
+    schema_validator.py      # SDTM/ADaM/Stats output validation + EFFFL + completeness
     script_cache.py          # SHA-256 keyed R script cache (track-aware)
     stage_comparator.py      # Per-stage comparison: SDTM, ADaM, Stats
     stderr_filter.py         # R stderr noise removal (package loading, masking warnings)
     pre_execution.py         # Static R code analysis before Docker execution
+    data_dictionary.py       # Per-dataset data dictionary generation (DM, VS, ADSL, ADTTE)
     logging.py               # Loguru setup with structured JSONL and token logging
   templates/
     prompts/
       simulator.j2           # Jinja2 prompt for data generation
       sdtm.j2                # Jinja2 prompt for CDISC SDTM mapping
-      adam.j2                # Jinja2 prompt for ADaM derivation
+      adam.j2                # Jinja2 prompt for ADSL + ADTTE derivation
       stats.j2               # Jinja2 prompt for survival analysis
-      double_programmer.j2   # (deprecated) Legacy validation prompt
       medical_writer.j2      # Jinja2 prompt for CSR generation
+      protocol_parser.j2     # Jinja2 prompt for protocol extraction
+      double_programmer.j2   # (deprecated) Legacy validation prompt
 docker/
   r-clinical/
-    Dockerfile               # R 4.5 + 11 statistical packages
+    Dockerfile               # R 4.5.2 + 12 statistical packages
     healthcheck.R            # Package load verification
 ```
 

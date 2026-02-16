@@ -55,7 +55,7 @@ Plans:
 - [ ] **Phase 5: CSR Data Dictionary Extraction** — Move data dictionary from CSR to standalone CSV files
 - [ ] **Phase 6: Interactive Execution Mode** — Stage-level pause mode for step-by-step pipeline review
 - [ ] **Phase 7: Protocol Parser Agent** — Natural-language .docx to structured trial config
-- [ ] **Phase 8: ADaM ADSL Dataset & Flow Fix** — Add ADSL subject-level dataset, fix ADTTE to derive from ADSL
+- [x] **Phase 8: ADaM ADSL Dataset & Flow Fix** — Add ADSL subject-level dataset, fix ADTTE to derive from ADSL
 
 ## Phase Details
 
@@ -119,9 +119,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — ADSL schema constants + validation + data dictionary entries
-- [ ] 08-02-PLAN.md — ADaM prompt template rewrite + agent + orchestrator updates
-- [ ] 08-03-PLAN.md — ADSL validation and data dictionary tests
+- [x] 08-01-PLAN.md — ADSL schema constants + validation + data dictionary entries
+- [x] 08-02-PLAN.md — ADaM prompt template rewrite + agent + orchestrator updates
+- [x] 08-03-PLAN.md — ADSL validation and data dictionary tests
 
 ## Progress
 
@@ -136,4 +136,4 @@ Phases execute in numeric order: 5 → 6 → 7 → 8
 | 5. CSR Data Dictionary Extraction | v1.2 | 0/1 | Planned | - |
 | 6. Interactive Execution Mode | v1.2 | 0/1 | Planned | - |
 | 7. Protocol Parser Agent | v1.2 | 0/3 | Planned | - |
-| 8. ADaM ADSL Dataset & Flow Fix | v1.2 | 0/3 | Planned | - |
+| 8. ADaM ADSL Dataset & Flow Fix | v1.2 | 3/3 | Complete | 2026-02-15 |

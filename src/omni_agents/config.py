@@ -126,7 +126,7 @@ class OpenAIConfig(BaseModel):
     """OpenAI GPT-4 API configuration."""
 
     api_key: str
-    model: str = "gpt-4o"
+    model: str = "o3"
     temperature: float = 0.0
 
 

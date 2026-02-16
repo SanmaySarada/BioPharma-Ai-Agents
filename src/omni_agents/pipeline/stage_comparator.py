@@ -272,35 +272,43 @@ class StageComparator:
         results_a = json.loads((track_a_dir / "results.json").read_text())
         results_b = json.loads((track_b_dir / "results.json").read_text())
 
-        # Extract metric values from both tracks
-        metrics: dict[str, tuple[float, float]] = {
+        # Extract metric values from both tracks.
+        # R can produce "NA" for undefined statistics (e.g. KM median when
+        # fewer than 50% of subjects have events).  We store these as None
+        # and handle them specially during comparison.
+        def _to_float(val: object) -> float | None:
+            if val is None or val == "NA":
+                return None
+            return float(val)  # type: ignore[arg-type]
+
+        metrics: dict[str, tuple[float | None, float | None]] = {
             "n_subjects": (
-                float(results_a["metadata"]["n_subjects"]),
-                float(results_b["metadata"]["n_subjects"]),
+                _to_float(results_a["metadata"]["n_subjects"]),
+                _to_float(results_b["metadata"]["n_subjects"]),
             ),
             "n_events": (
-                float(results_a["metadata"]["n_events"]),
-                float(results_b["metadata"]["n_events"]),
+                _to_float(results_a["metadata"]["n_events"]),
+                _to_float(results_b["metadata"]["n_events"]),
             ),
             "n_censored": (
-                float(results_a["metadata"]["n_censored"]),
-                float(results_b["metadata"]["n_censored"]),
+                _to_float(results_a["metadata"]["n_censored"]),
+                _to_float(results_b["metadata"]["n_censored"]),
             ),
             "logrank_p": (
-                float(results_a["table2"]["logrank_p"]),
-                float(results_b["table2"]["logrank_p"]),
+                _to_float(results_a["table2"]["logrank_p"]),
+                _to_float(results_b["table2"]["logrank_p"]),
             ),
             "cox_hr": (
-                float(results_a["table3"]["cox_hr"]),
-                float(results_b["table3"]["cox_hr"]),
+                _to_float(results_a["table3"]["cox_hr"]),
+                _to_float(results_b["table3"]["cox_hr"]),
             ),
             "km_median_treatment": (
-                float(results_a["table2"]["km_median_treatment"]),
-                float(results_b["table2"]["km_median_treatment"]),
+                _to_float(results_a["table2"]["km_median_treatment"]),
+                _to_float(results_b["table2"]["km_median_treatment"]),
             ),
             "km_median_placebo": (
-                float(results_a["table2"]["km_median_placebo"]),
-                float(results_b["table2"]["km_median_placebo"]),
+                _to_float(results_a["table2"]["km_median_placebo"]),
+                _to_float(results_b["table2"]["km_median_placebo"]),
             ),
         }
 
@@ -310,6 +318,16 @@ class StageComparator:
         for metric_name, (val_a, val_b) in metrics.items():
             track_a_summary[metric_name] = val_a
             track_b_summary[metric_name] = val_b
+
+            # Handle NA values: both NA = agree, one NA = mismatch
+            if val_a is None and val_b is None:
+                continue
+            if val_a is None or val_b is None:
+                issues.append(
+                    f"{metric_name} mismatch: Track A={val_a}, Track B={val_b} "
+                    f"(one track returned NA)"
+                )
+                continue
 
             spec = STATS_TOLERANCES[metric_name]
             tol_type: str = spec["type"]

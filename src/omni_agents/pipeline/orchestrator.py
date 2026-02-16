@@ -55,7 +55,12 @@ from omni_agents.pipeline.retry import (
     NonRetriableError,
     execute_with_retry,
 )
-from omni_agents.pipeline.data_dictionary import write_adam_data_dictionary, write_sdtm_data_dictionary
+from omni_agents.pipeline.data_dictionary import (
+    write_adsl_data_dictionary,
+    write_adtte_data_dictionary,
+    write_dm_data_dictionary,
+    write_vs_data_dictionary,
+)
 from omni_agents.pipeline.schema_validator import SchemaValidator
 from omni_agents.pipeline.script_cache import ScriptCache
 
@@ -319,9 +324,10 @@ class PipelineOrchestrator:
         SchemaValidator.validate_sdtm(sdtm_dir, self.settings.trial.n_subjects)
         logger.info(f"SDTM schema validation passed ({track_id})")
 
-        # Generate SDTM data dictionary (DICT-02, DICT-04)
-        write_sdtm_data_dictionary(sdtm_dir, self.settings.trial)
-        logger.info(f"SDTM data dictionary written ({track_id})")
+        # Generate per-dataset SDTM data dictionaries (DICT-02, DICT-04)
+        write_dm_data_dictionary(sdtm_dir, self.settings.trial)
+        write_vs_data_dictionary(sdtm_dir, self.settings.trial)
+        logger.info(f"SDTM data dictionaries written ({track_id})")
 
         # === ADaM Agent ===
         adam_dir = track_dir / "adam"
@@ -341,7 +347,7 @@ class PipelineOrchestrator:
             work_dir=adam_dir,
             input_volumes={str(sdtm_dir): "/workspace/input"},
             expected_inputs=["DM.csv", "VS.csv"],
-            expected_outputs=["ADSL.csv", "ADSL_summary.json", "ADTTE.rds", "ADTTE_summary.json"],
+            expected_outputs=["ADSL.csv", "ADSL_summary.json", "ADTTE.rds", "ADTTE.xlsx", "ADTTE_summary.json"],
             track_id=track_id,
         )
         duration = time.monotonic() - t0
@@ -353,9 +359,10 @@ class PipelineOrchestrator:
         SchemaValidator.validate_adam(adam_dir, self.settings.trial.n_subjects)
         logger.info(f"ADaM schema validation passed ({track_id})")
 
-        # Generate ADaM data dictionary (DICT-03, DICT-04)
-        write_adam_data_dictionary(adam_dir, self.settings.trial)
-        logger.info(f"ADaM data dictionary written ({track_id})")
+        # Generate per-dataset ADaM data dictionaries (DICT-03, DICT-04)
+        write_adsl_data_dictionary(adam_dir, self.settings.trial)
+        write_adtte_data_dictionary(adam_dir, self.settings.trial)
+        logger.info(f"ADaM data dictionaries written ({track_id})")
 
         # === Stats Agent ===
         stats_dir = track_dir / "stats"

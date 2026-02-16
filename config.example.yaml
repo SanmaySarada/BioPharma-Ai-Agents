@@ -50,7 +50,7 @@ llm:
   openai:
     # Set OPENAI_API_KEY environment variable (never paste key here)
     api_key: $OPENAI_API_KEY
-    model: "gpt-4o"
+    model: "o3"
     temperature: 0.0
 
 resolution:

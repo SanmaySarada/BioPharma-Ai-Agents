@@ -238,6 +238,17 @@ class SchemaValidator:
                     )
                 )
 
+            # EFFFL derivation sanity check: read ADSL.csv directly
+            adsl_rows = cls._read_csv(adsl_csv_path)
+            if adsl_rows and "EFFFL" in adsl_rows[0]:
+                efffl_y = sum(1 for row in adsl_rows if row["EFFFL"] == "Y")
+                if efffl_y == len(adsl_rows):
+                    issues.append(
+                        "ADSL.EFFFL: all subjects marked 'Y' — likely "
+                        "derivation bug. Expected some 'N' given dropout "
+                        "rate produces subjects with no post-baseline data."
+                    )
+
         # --- ADTTE checks ---
         rds_path = adam_dir / "ADTTE.rds"
         summary_path = adam_dir / "ADTTE_summary.json"
@@ -391,29 +402,41 @@ class SchemaValidator:
         """
         issues: list[str] = []
 
-        sdtm_dict = track_dir / "sdtm" / "data_dictionary.csv"
-        if not sdtm_dict.exists():
-            issues.append(
-                "sdtm/data_dictionary.csv not found — SDTM data dictionary missing"
-            )
+        # Per-dataset SDTM data dictionaries
+        for name in ("DM_data_dictionary.csv", "VS_data_dictionary.csv"):
+            path = track_dir / "sdtm" / name
+            if not path.exists():
+                issues.append(
+                    f"sdtm/{name} not found — SDTM data dictionary missing"
+                )
 
-        adam_dict = track_dir / "adam" / "data_dictionary.csv"
-        if not adam_dict.exists():
-            issues.append(
-                "adam/data_dictionary.csv not found — ADaM data dictionary missing"
-            )
+        # Per-dataset ADaM data dictionaries
+        for name in ("ADSL_data_dictionary.csv", "ADTTE_data_dictionary.csv"):
+            path = track_dir / "adam" / name
+            if not path.exists():
+                issues.append(
+                    f"adam/{name} not found — ADaM data dictionary missing"
+                )
 
+        # ADSL subject-level dataset
         adsl_csv = track_dir / "adam" / "ADSL.csv"
         if not adsl_csv.exists():
             issues.append(
                 "adam/ADSL.csv not found — ADSL subject-level dataset missing"
             )
 
+        # ADTTE Excel export
+        adtte_xlsx = track_dir / "adam" / "ADTTE.xlsx"
+        if not adtte_xlsx.exists():
+            issues.append(
+                "adam/ADTTE.xlsx not found — ADTTE Excel export missing"
+            )
+
         if issues:
             raise SchemaValidationError("OutputCompleteness", issues)
 
         logger.info(
-            "Output completeness check passed: data dictionaries and ADSL present"
+            "Output completeness check passed: data dictionaries, ADSL, and ADTTE.xlsx present"
         )
 
     @classmethod

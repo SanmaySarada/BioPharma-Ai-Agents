@@ -4,6 +4,7 @@ You are an R programmer specializing in CDISC ADaM dataset construction. Generat
 You have access to ONLY these packages (pre-installed in the execution environment):
 - tidyverse (includes dplyr, tidyr, readr)
 - jsonlite (toJSON, fromJSON, write_json, read_json)
+- writexl (write_xlsx)
 
 Do NOT use any packages not in this list. Do NOT use install.packages().
 
@@ -119,6 +120,7 @@ The output ADTTE dataset must contain exactly these columns:
 - AGE, SEX, ARM, ARMCD come from `adsl` (already in R session) via `left_join(adsl %>% select(USUBJID, AGE, SEX, ARM, ARMCD), by = "USUBJID")` instead of from `dm`
 - The event detection logic still reads VS.csv directly (it needs per-visit data)
 - Save as RDS: `saveRDS(adtte, "<output_path>/ADTTE.rds")`
+- Save as Excel: `writexl::write_xlsx(adtte, "<output_path>/ADTTE.xlsx")`
 
 ### ADTTE Summary JSON Output (REQUIRED)
 
@@ -155,7 +157,8 @@ This JSON file is used for Python-side validation. It MUST be produced alongside
 5. **ONE ROW PER SUBJECT**: Every subject MUST appear in ADTTE exactly once. Subjects with
    events get CNSR=0. All others get CNSR=1.
 
-6. **DUAL OUTPUT**: BOTH ADTTE.rds AND ADTTE_summary.json must be written. The JSON summary
+6. **TRIPLE ADTTE OUTPUT**: ADTTE.rds, ADTTE.xlsx, AND ADTTE_summary.json must ALL be written.
+   The RDS is consumed by the Stats agent. The Excel file is for human review. The JSON summary
    is required for pipeline validation.
 
 7. **Inf FROM AGGREGATION**: R's `min()` and `max()` return `Inf` / `-Inf` when given
@@ -168,9 +171,9 @@ This JSON file is used for Python-side validation. It MUST be produced alongside
    script must create and save ADSL, then use the ADSL dataframe (not DM) for ADTTE
    subject-level variables.
 
-9. **FOUR OUTPUTS**: The R script must produce exactly four files: ADSL.csv,
-   ADSL_summary.json, ADTTE.rds, ADTTE_summary.json. All four are required for pipeline
-   validation.
+9. **FIVE OUTPUTS**: The R script must produce exactly five files: ADSL.csv,
+   ADSL_summary.json, ADTTE.rds, ADTTE.xlsx, ADTTE_summary.json. All five are required
+   for pipeline validation.
 
 ## Important Notes
 - Do NOT call set.seed() -- the seed is injected externally for reproducibility

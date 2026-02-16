@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-02-14)
 
 **Core value:** Computational double programming for regulated biostatistics
-**Current focus:** Phase 8 complete — ADaM ADSL Dataset & Flow Fix
+**Current focus:** Phase 8 complete — remaining phases 5, 6, 7 to plan/execute
 
 ## Current Position
 
 Milestone: v1.2 Usability & Flexibility
-Phase: 8 of 8 (ADaM ADSL Dataset & Flow Fix)
+Phase: 8 of 8 (ADaM ADSL Dataset & Flow Fix) — VERIFIED COMPLETE
 Plan: 3 of 3 complete
-Status: Phase complete
-Last activity: 2026-02-15 — Completed 08-03-PLAN.md (ADSL validation and data dictionary tests)
+Status: Phase verified ✓ (4/4 must-haves passed)
+Last activity: 2026-02-15 — Phase 8 verified and complete
 
 Progress: █████████████░░░░░░░ 67% (10/15 plans complete)
 
@@ -60,6 +60,6 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 08-03-PLAN.md (Phase 8 complete)
+Stopped at: Phase 8 verified complete
 Resume file: None
-Next: Phase 8 fully complete. Remaining plans are in phases 4-7.
+Next: Plan phase 5 (/gsd:plan-phase 5)

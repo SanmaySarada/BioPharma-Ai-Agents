@@ -11,6 +11,9 @@ from omni_agents.llm.base import BaseLLM, LLMError, LLMResponse
 _T = TypeVar("_T", bound=BaseModel)
 
 
+_REASONING_MODELS = {"o1", "o1-mini", "o1-pro", "o3", "o3-mini", "o4-mini"}
+
+
 class OpenAIAdapter(BaseLLM):
     """Async adapter for the OpenAI Chat Completions API.
 
@@ -24,6 +27,7 @@ class OpenAIAdapter(BaseLLM):
         self.client = AsyncOpenAI(api_key=config.api_key)
         self.model = config.model
         self.temperature = config.temperature
+        self._is_reasoning = any(self.model.startswith(m) for m in _REASONING_MODELS)
 
     @property
     def provider(self) -> str:  # noqa: D401
@@ -44,14 +48,17 @@ class OpenAIAdapter(BaseLLM):
             LLMError: If the OpenAI API call fails.
         """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
+            system_role = "developer" if self._is_reasoning else "system"
+            kwargs: dict = {
+                "model": self.model,
+                "messages": [
+                    {"role": system_role, "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=self.temperature,
-            )
+            }
+            if not self._is_reasoning:
+                kwargs["temperature"] = self.temperature
+            response = await self.client.chat.completions.create(**kwargs)
         except APIError as exc:
             raise LLMError(
                 provider="openai",
@@ -101,15 +108,18 @@ class OpenAIAdapter(BaseLLM):
             LLMError: If the OpenAI API call or parsing fails.
         """
         try:
-            completion = await self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
+            system_role = "developer" if self._is_reasoning else "system"
+            kwargs: dict = {
+                "model": self.model,
+                "messages": [
+                    {"role": system_role, "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=self.temperature,
-                response_format=response_model,
-            )
+                "response_format": response_model,
+            }
+            if not self._is_reasoning:
+                kwargs["temperature"] = self.temperature
+            completion = await self.client.beta.chat.completions.parse(**kwargs)
         except APIError as exc:
             raise LLMError(
                 provider="openai",

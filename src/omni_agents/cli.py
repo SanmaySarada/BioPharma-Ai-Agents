@@ -149,7 +149,7 @@ def _write_config(trial_config: "TrialConfig", output_path: Path) -> None:
             },
             "openai": {
                 "api_key": "$OPENAI_API_KEY",
-                "model": "gpt-4o",
+                "model": "o3",
                 "temperature": 0.0,
             },
         },

@@ -45,7 +45,7 @@ def minimal_config_dict() -> dict:
             },
             "openai": {
                 "api_key": "test-openai-key",
-                "model": "gpt-4o",
+                "model": "o3",
                 "temperature": 0.0,
             },
         },

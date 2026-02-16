@@ -43,15 +43,15 @@
 
 ### ADaM ADSL Dataset
 
-- [ ] **ADSL-01**: ADSL.csv generated in adam/ output directory with one row per subject containing CDISC ADaM subject-level variables
-- [ ] **ADSL-02**: ADSL includes demographics (USUBJID, SUBJID, AGE, AGEU, AGEGR1, SEX, RACE) from DM domain
-- [ ] **ADSL-03**: ADSL includes ADaM treatment variables (ARM, ARMCD, TRT01P, TRT01A) mapped from SDTM
-- [ ] **ADSL-04**: ADSL includes population flags (SAFFL, ITTFL, EFFFL) derived from randomization and post-baseline data
-- [ ] **ADSL-05**: ADSL includes disposition (EOSSTT, DCSREAS) derived from VS dropout detection
-- [ ] **ADSL-06**: ADSL includes treatment timing (TRTSDT, TRTEDT, TRTDUR) derived from visit data
-- [ ] **ADSL-07**: ADTTE derives subject-level variables (AGE, SEX, ARM, ARMCD) from ADSL via merge, not directly from SDTM DM
-- [ ] **ADSL-08**: ADaM data dictionary includes ADSL variable definitions
-- [ ] **ADSL-09**: Schema validator checks ADSL.csv presence and column structure in adam/ directory
+- [x] **ADSL-01**: ADSL.csv generated in adam/ output directory with one row per subject containing CDISC ADaM subject-level variables
+- [x] **ADSL-02**: ADSL includes demographics (USUBJID, SUBJID, AGE, AGEU, AGEGR1, SEX, RACE) from DM domain
+- [x] **ADSL-03**: ADSL includes ADaM treatment variables (ARM, ARMCD, TRT01P, TRT01A) mapped from SDTM
+- [x] **ADSL-04**: ADSL includes population flags (SAFFL, ITTFL, EFFFL) derived from randomization and post-baseline data
+- [x] **ADSL-05**: ADSL includes disposition (EOSSTT, DCSREAS) derived from VS dropout detection
+- [x] **ADSL-06**: ADSL includes treatment timing (TRTSDT, TRTEDT, TRTDUR) derived from visit data
+- [x] **ADSL-07**: ADTTE derives subject-level variables (AGE, SEX, ARM, ARMCD) from ADSL via merge, not directly from SDTM DM
+- [x] **ADSL-08**: ADaM data dictionary includes ADSL variable definitions
+- [x] **ADSL-09**: Schema validator checks ADSL.csv presence and column structure in adam/ directory
 
 ### Interactive Mode
 
@@ -125,19 +125,19 @@ Which phases cover which requirements. Updated by create-roadmap.
 | PARSE-03 | Phase 7 | Pending |
 | PARSE-04 | Phase 7 | Pending |
 | PARSE-05 | Phase 7 | Pending |
-| ADSL-01 | Phase 8 | Pending |
-| ADSL-02 | Phase 8 | Pending |
-| ADSL-03 | Phase 8 | Pending |
-| ADSL-04 | Phase 8 | Pending |
-| ADSL-05 | Phase 8 | Pending |
-| ADSL-06 | Phase 8 | Pending |
-| ADSL-07 | Phase 8 | Pending |
-| ADSL-08 | Phase 8 | Pending |
-| ADSL-09 | Phase 8 | Pending |
+| ADSL-01 | Phase 8 | Complete |
+| ADSL-02 | Phase 8 | Complete |
+| ADSL-03 | Phase 8 | Complete |
+| ADSL-04 | Phase 8 | Complete |
+| ADSL-05 | Phase 8 | Complete |
+| ADSL-06 | Phase 8 | Complete |
+| ADSL-07 | Phase 8 | Complete |
+| ADSL-08 | Phase 8 | Complete |
+| ADSL-09 | Phase 8 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 8 complete
-- v1.2 requirements: 25 pending (all mapped)
+- v1.2 requirements: 16 pending, 9 complete (all mapped)
 - Total v1 requirements: 33
 - Mapped to phases: 33
 - Unmapped: 0

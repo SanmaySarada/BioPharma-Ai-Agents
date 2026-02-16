@@ -5,7 +5,7 @@ Verifies:
 - ADTTE with n_censored=0 raises SchemaValidationError
 - ADTTE with event rate > 95% raises SchemaValidationError
 - ADTTE with normal event rate passes validation
-- Output completeness checks for data_dictionary.csv and ADSL.csv (DICT-05)
+- Output completeness checks for per-dataset data dictionaries, ADSL.csv, and ADTTE.xlsx (DICT-05)
 """
 
 import csv
@@ -33,6 +33,7 @@ def _make_adam_dir(
     n_censored: int,
     *,
     include_adsl: bool = True,
+    efffl_all_y: bool = False,
 ) -> Path:
     """Create a minimal ADaM directory with ADTTE and optionally ADSL files."""
     adam_dir = tmp_path / "adam"
@@ -64,7 +65,8 @@ def _make_adam_dir(
                 row["TRT01A"] = "Treatment"
                 row["SAFFL"] = "Y"
                 row["ITTFL"] = "Y"
-                row["EFFFL"] = "Y"
+                # Realistic: some subjects lack post-baseline data (EFFFL="N")
+                row["EFFFL"] = "Y" if (efffl_all_y or i < n_rows - 10) else "N"
                 row["TRTSDT"] = "0"
                 row["TRTEDT"] = "25"
                 row["TRTDUR"] = "25"
@@ -168,66 +170,100 @@ def test_adam_with_adsl_passes(tmp_path: Path) -> None:
     SchemaValidator.validate_adam(adam_dir, expected_subjects=300)
 
 
+def test_adam_efffl_all_y_fails(tmp_path: Path) -> None:
+    """ADSL with EFFFL='Y' for all subjects should fail — derivation bug."""
+    adam_dir = _make_adam_dir(tmp_path, n_events=215, n_censored=85, efffl_all_y=True)
+    with pytest.raises(SchemaValidationError, match="ADSL.EFFFL.*all subjects marked"):
+        SchemaValidator.validate_adam(adam_dir, expected_subjects=300)
+
+
 # ---------------------------------------------------------------------------
 # Output completeness tests (DICT-05)
 # ---------------------------------------------------------------------------
 
 
-def test_output_completeness_passes_with_dicts_and_adsl(tmp_path: Path) -> None:
-    """Completeness check passes when data dictionaries and ADSL exist."""
+def _make_complete_track(tmp_path: Path) -> Path:
+    """Create a track directory with all expected output files for completeness checks."""
     track_dir = tmp_path / "track"
     (track_dir / "sdtm").mkdir(parents=True)
     (track_dir / "adam").mkdir(parents=True)
-    (track_dir / "sdtm" / "data_dictionary.csv").write_text("header\n")
-    (track_dir / "adam" / "data_dictionary.csv").write_text("header\n")
+    # Per-dataset SDTM dictionaries
+    (track_dir / "sdtm" / "DM_data_dictionary.csv").write_text("header\n")
+    (track_dir / "sdtm" / "VS_data_dictionary.csv").write_text("header\n")
+    # Per-dataset ADaM dictionaries
+    (track_dir / "adam" / "ADSL_data_dictionary.csv").write_text("header\n")
+    (track_dir / "adam" / "ADTTE_data_dictionary.csv").write_text("header\n")
+    # Data files
     (track_dir / "adam" / "ADSL.csv").write_text("header\n")
+    (track_dir / "adam" / "ADTTE.xlsx").write_bytes(b"dummy")
+    return track_dir
 
+
+def test_output_completeness_passes_with_all_files(tmp_path: Path) -> None:
+    """Completeness check passes when all data dictionaries, ADSL, and ADTTE.xlsx exist."""
+    track_dir = _make_complete_track(tmp_path)
     # Should not raise
     SchemaValidator.validate_output_completeness(track_dir)
 
 
 def test_output_completeness_fails_missing_adsl(tmp_path: Path) -> None:
     """Completeness check fails when adam/ADSL.csv is missing."""
-    track_dir = tmp_path / "track"
-    (track_dir / "sdtm").mkdir(parents=True)
-    (track_dir / "adam").mkdir(parents=True)
-    (track_dir / "sdtm" / "data_dictionary.csv").write_text("header\n")
-    (track_dir / "adam" / "data_dictionary.csv").write_text("header\n")
-    # No ADSL.csv
+    track_dir = _make_complete_track(tmp_path)
+    (track_dir / "adam" / "ADSL.csv").unlink()
     with pytest.raises(SchemaValidationError, match="ADSL.csv not found"):
         SchemaValidator.validate_output_completeness(track_dir)
 
 
-def test_output_completeness_fails_missing_sdtm_dict(tmp_path: Path) -> None:
-    """Completeness check fails when SDTM data dictionary is missing."""
-    track_dir = tmp_path / "track"
-    (track_dir / "sdtm").mkdir(parents=True)
-    (track_dir / "adam").mkdir(parents=True)
-    (track_dir / "adam" / "data_dictionary.csv").write_text("header\n")
-    (track_dir / "adam" / "ADSL.csv").write_text("header\n")
+def test_output_completeness_fails_missing_adtte_xlsx(tmp_path: Path) -> None:
+    """Completeness check fails when adam/ADTTE.xlsx is missing."""
+    track_dir = _make_complete_track(tmp_path)
+    (track_dir / "adam" / "ADTTE.xlsx").unlink()
+    with pytest.raises(SchemaValidationError, match="ADTTE.xlsx not found"):
+        SchemaValidator.validate_output_completeness(track_dir)
 
+
+def test_output_completeness_fails_missing_dm_dict(tmp_path: Path) -> None:
+    """Completeness check fails when DM data dictionary is missing."""
+    track_dir = _make_complete_track(tmp_path)
+    (track_dir / "sdtm" / "DM_data_dictionary.csv").unlink()
     with pytest.raises(
-        SchemaValidationError, match="sdtm/data_dictionary.csv not found"
+        SchemaValidationError, match="sdtm/DM_data_dictionary.csv not found"
     ):
         SchemaValidator.validate_output_completeness(track_dir)
 
 
-def test_output_completeness_fails_missing_adam_dict(tmp_path: Path) -> None:
-    """Completeness check fails when ADaM data dictionary is missing."""
-    track_dir = tmp_path / "track"
-    (track_dir / "sdtm").mkdir(parents=True)
-    (track_dir / "adam").mkdir(parents=True)
-    (track_dir / "sdtm" / "data_dictionary.csv").write_text("header\n")
-    (track_dir / "adam" / "ADSL.csv").write_text("header\n")
-
+def test_output_completeness_fails_missing_vs_dict(tmp_path: Path) -> None:
+    """Completeness check fails when VS data dictionary is missing."""
+    track_dir = _make_complete_track(tmp_path)
+    (track_dir / "sdtm" / "VS_data_dictionary.csv").unlink()
     with pytest.raises(
-        SchemaValidationError, match="adam/data_dictionary.csv not found"
+        SchemaValidationError, match="sdtm/VS_data_dictionary.csv not found"
+    ):
+        SchemaValidator.validate_output_completeness(track_dir)
+
+
+def test_output_completeness_fails_missing_adsl_dict(tmp_path: Path) -> None:
+    """Completeness check fails when ADSL data dictionary is missing."""
+    track_dir = _make_complete_track(tmp_path)
+    (track_dir / "adam" / "ADSL_data_dictionary.csv").unlink()
+    with pytest.raises(
+        SchemaValidationError, match="adam/ADSL_data_dictionary.csv not found"
+    ):
+        SchemaValidator.validate_output_completeness(track_dir)
+
+
+def test_output_completeness_fails_missing_adtte_dict(tmp_path: Path) -> None:
+    """Completeness check fails when ADTTE data dictionary is missing."""
+    track_dir = _make_complete_track(tmp_path)
+    (track_dir / "adam" / "ADTTE_data_dictionary.csv").unlink()
+    with pytest.raises(
+        SchemaValidationError, match="adam/ADTTE_data_dictionary.csv not found"
     ):
         SchemaValidator.validate_output_completeness(track_dir)
 
 
 def test_output_completeness_fails_missing_all(tmp_path: Path) -> None:
-    """Completeness check fails with 3 issues when both dicts and ADSL missing."""
+    """Completeness check fails with 7 issues when all outputs missing."""
     track_dir = tmp_path / "track"
     (track_dir / "sdtm").mkdir(parents=True)
     (track_dir / "adam").mkdir(parents=True)
@@ -235,5 +271,6 @@ def test_output_completeness_fails_missing_all(tmp_path: Path) -> None:
     with pytest.raises(SchemaValidationError) as exc_info:
         SchemaValidator.validate_output_completeness(track_dir)
 
-    assert len(exc_info.value.issues) == 3
+    # 2 SDTM dicts + 2 ADaM dicts + ADSL.csv + ADTTE.xlsx = 6
+    assert len(exc_info.value.issues) == 6
     assert exc_info.value.agent == "OutputCompleteness"
