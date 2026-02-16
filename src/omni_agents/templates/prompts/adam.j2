@@ -1,4 +1,4 @@
-You are an R programmer specializing in CDISC ADaM dataset construction. Generate R code to create an ADTTE (Analysis Dataset for Time-to-Event) from SDTM DM and VS domains.
+You are an R programmer specializing in CDISC ADaM dataset construction. Generate R code to create ADSL (Subject-Level Analysis Dataset) and ADTTE (Analysis Dataset for Time-to-Event) from SDTM DM and VS domains.
 
 ## Available R Packages
 You have access to ONLY these packages (pre-installed in the execution environment):
@@ -19,7 +19,65 @@ Do NOT use any packages not in this list. Do NOT use install.packages().
 - Key columns: USUBJID, VSSTRESN (numeric SBP value), VISITNUM (0 through {{ visits - 1 }})
 - {{ n_subjects * visits }} rows (one per subject per visit)
 
-## Event Definition
+## Part 1: ADSL Dataset (Subject-Level Analysis Dataset)
+
+ADSL must be created FIRST, before ADTTE. It contains one row per subject with demographics, treatment variables, population flags, and disposition.
+
+### ADSL Output Specification
+
+The output ADSL dataset must contain exactly these columns:
+
+| Column   | Type | Value                                                                                |
+|----------|------|--------------------------------------------------------------------------------------|
+| STUDYID  | Char | "{{ study_id }}"                                                                     |
+| USUBJID  | Char | From DM.USUBJID                                                                      |
+| SUBJID   | Char | From DM.SUBJID                                                                       |
+| AGE      | Num  | From DM.AGE                                                                          |
+| AGEU     | Char | "YEARS"                                                                              |
+| AGEGR1   | Char | "<65" if AGE < 65, ">=65" otherwise                                                  |
+| SEX      | Char | From DM.SEX                                                                          |
+| RACE     | Char | From DM.RACE                                                                         |
+| ARM      | Char | From DM.ARM                                                                          |
+| ARMCD    | Char | From DM.ARMCD                                                                        |
+| TRT01P   | Char | = ARM (no crossover in this study)                                                   |
+| TRT01A   | Char | = ARM (no crossover in this study)                                                   |
+| SAFFL    | Char | "Y" for all randomized subjects                                                     |
+| ITTFL    | Char | "Y" for all randomized subjects                                                     |
+| EFFFL    | Char | "Y" if subject has >= 1 post-baseline VS observation with non-NA VSSTRESN            |
+| TRTSDT   | Num  | 0 (baseline week)                                                                    |
+| TRTEDT   | Num  | Last observed (non-NA) VISITNUM for the subject from VS                              |
+| TRTDUR   | Num  | TRTEDT - TRTSDT                                                                      |
+| EOSSTT   | Char | "COMPLETED" if TRTEDT == {{ visits - 1 }}, "DISCONTINUED" otherwise                 |
+| DCSREAS  | Char | "" if EOSSTT == "COMPLETED", "Dropout" if EOSSTT == "DISCONTINUED"                   |
+
+### ADSL Derivation Details
+
+a. Read DM.csv and VS.csv.
+
+b. Create ADSL with one row per subject. Key derivation details:
+   - `TRTEDT`: Use `max(VISITNUM[!is.na(VSSTRESN)])` per subject from VS. IMPORTANT: Handle with `na.rm = TRUE` AND check for empty vector -- `max(integer(0), na.rm = TRUE)` returns `-Inf`. Subjects with all NA VSSTRESN should get TRTEDT = 0. Use `is.finite()` to check and replace `-Inf` with 0.
+   - `EFFFL`: "Y" if the subject has at least 1 post-baseline (VISITNUM > 0) VS observation where VSSTRESN is non-NA.
+   - `EOSSTT`/`DCSREAS`: Based on TRTEDT comparison to {{ visits - 1 }}.
+   - `SUBJID`: If DM does not contain a SUBJID column, derive it from USUBJID (e.g., the numeric portion after the last hyphen).
+
+c. Save ADSL as CSV: `write.csv(adsl, "<output_path>/ADSL.csv", row.names = FALSE)`
+
+d. Write ADSL summary JSON for Python validation:
+```r
+adsl_summary <- list(
+  n_rows = nrow(adsl),
+  columns = names(adsl)
+)
+write_json(adsl_summary, "<output_path>/ADSL_summary.json", auto_unbox = TRUE)
+```
+
+e. Print ADSL summary to stdout: n_rows, columns.
+
+## Part 2: ADTTE Dataset (Time-to-Event)
+
+After ADSL is created and saved, construct ADTTE. ADTTE merges subject-level variables from the ADSL dataframe already in memory (NOT from DM directly).
+
+### Event Definition
 
 Event: First post-baseline visit (VISITNUM > 0) where SBP < {{ event_threshold }} mmHg.
 
@@ -29,7 +87,7 @@ IMPORTANT: When checking VSSTRESN < {{ event_threshold }}, you MUST handle NA va
 use `!is.na(VSSTRESN) & VSSTRESN < {{ event_threshold }}`. R's NA propagation will cause
 bugs otherwise. Never compare NA directly with `<`.
 
-## Censoring Rules
+### Censoring Rules
 
 1. **Dropout**: Subject drops out (all subsequent VSSTRESN = NA after last observed visit).
    Censored at last observed post-baseline visit. AVAL = last observed VISITNUM.
@@ -38,7 +96,7 @@ bugs otherwise. Never compare NA directly with `<`.
 3. **NA visits are NOT events**: A visit with NA VSSTRESN is NOT an event. Skip it when
    looking for the first event.
 
-## ADTTE Output Specification
+### ADTTE Output Specification
 
 The output ADTTE dataset must contain exactly these columns:
 
@@ -52,15 +110,17 @@ The output ADTTE dataset must contain exactly these columns:
 | CNSR      | 0 for EVENT, 1 for CENSORED                                                           |
 | STARTDT   | 0 (baseline, Week 0)                                                                   |
 | EVNTDESC  | "SBP < {{ event_threshold }} mmHg" for events, "Dropout" or "Week {{ visits - 1 }} without event" for censored |
-| AGE       | From DM domain (via left_join on USUBJID)                                              |
-| SEX       | From DM domain (via left_join on USUBJID)                                              |
-| ARM       | From DM domain (via left_join on USUBJID)                                              |
-| ARMCD     | From DM domain (via left_join on USUBJID)                                              |
+| AGE       | From ADSL dataframe (via left_join on USUBJID)                                         |
+| SEX       | From ADSL dataframe (via left_join on USUBJID)                                         |
+| ARM       | From ADSL dataframe (via left_join on USUBJID)                                         |
+| ARMCD     | From ADSL dataframe (via left_join on USUBJID)                                         |
 
 - One row per subject ({{ n_subjects }} rows total)
+- AGE, SEX, ARM, ARMCD come from `adsl` (already in R session) via `left_join(adsl %>% select(USUBJID, AGE, SEX, ARM, ARMCD), by = "USUBJID")` instead of from `dm`
+- The event detection logic still reads VS.csv directly (it needs per-visit data)
 - Save as RDS: `saveRDS(adtte, "<output_path>/ADTTE.rds")`
 
-## ADTTE Summary JSON Output (REQUIRED)
+### ADTTE Summary JSON Output (REQUIRED)
 
 After creating ADTTE, you MUST also output a summary JSON file for Python-side validation:
 
@@ -103,6 +163,14 @@ This JSON file is used for Python-side validation. It MUST be produced alongside
    returns `Inf`, NOT `NA`. When checking whether a subject had an event, use
    `is.finite(event_visit)` instead of `!is.na(event_visit)`. The value `Inf` means
    "no event found" and the subject should be CENSORED, not treated as an event.
+
+8. **ADSL FIRST**: ADSL.csv must be written to disk BEFORE ADTTE construction begins. The R
+   script must create and save ADSL, then use the ADSL dataframe (not DM) for ADTTE
+   subject-level variables.
+
+9. **FOUR OUTPUTS**: The R script must produce exactly four files: ADSL.csv,
+   ADSL_summary.json, ADTTE.rds, ADTTE_summary.json. All four are required for pipeline
+   validation.
 
 ## Important Notes
 - Do NOT call set.seed() -- the seed is injected externally for reproducibility
