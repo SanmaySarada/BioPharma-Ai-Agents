@@ -116,7 +116,12 @@ Plans:
   3. ADaM data dictionary covers all ADSL variables
   4. Schema validator confirms ADSL.csv presence and correct column structure
 **Research**: Unlikely (CDISC ADSL spec is well-defined, implementation is standard R code)
-**Plans**: TBD (to be created by /gsd:plan-phase)
+**Plans**: 3 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — ADSL schema constants + validation + data dictionary entries
+- [ ] 08-02-PLAN.md — ADaM prompt template rewrite + agent + orchestrator updates
+- [ ] 08-03-PLAN.md — ADSL validation and data dictionary tests
 
 ## Progress
 
@@ -131,4 +136,4 @@ Phases execute in numeric order: 5 → 6 → 7 → 8
 | 5. CSR Data Dictionary Extraction | v1.2 | 0/1 | Planned | - |
 | 6. Interactive Execution Mode | v1.2 | 0/1 | Planned | - |
 | 7. Protocol Parser Agent | v1.2 | 0/3 | Planned | - |
-| 8. ADaM ADSL Dataset & Flow Fix | v1.2 | 0/? | Planned | - |
+| 8. ADaM ADSL Dataset & Flow Fix | v1.2 | 0/3 | Planned | - |
