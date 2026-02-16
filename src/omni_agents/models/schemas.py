@@ -29,6 +29,16 @@ REQUIRED_VS_COLS: frozenset[str] = frozenset({
 # ADaM Dataset Column Requirements
 # ---------------------------------------------------------------------------
 
+# ADSL Dataset (ADaM ADSL v1.1) — Subject-Level Analysis
+REQUIRED_ADSL_COLS: frozenset[str] = frozenset({
+    "STUDYID", "USUBJID", "SUBJID",
+    "AGE", "AGEU", "AGEGR1", "SEX", "RACE",
+    "ARM", "ARMCD", "TRT01P", "TRT01A",
+    "SAFFL", "ITTFL", "EFFFL",
+    "TRTSDT", "TRTEDT", "TRTDUR",
+    "EOSSTT", "DCSREAS",
+})
+
 # ADTTE Dataset (ADaM BDS-TTE v1.0)
 REQUIRED_ADTTE_COLS: frozenset[str] = frozenset({
     "STUDYID", "USUBJID", "PARAMCD", "PARAM",
@@ -63,6 +73,13 @@ STATS_EXPECTED_FILES: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 # Pydantic Models
 # ---------------------------------------------------------------------------
+
+
+class ADSLSummary(BaseModel):
+    """Summary of ADSL dataset for Python-side validation."""
+
+    n_rows: int
+    columns: list[str]
 
 
 class ADTTESummary(BaseModel):
