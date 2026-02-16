@@ -1,8 +1,9 @@
-"""ADaM Engineer agent (Agent 3A): constructs ADTTE from SDTM domains.
+"""ADaM Engineer agent (Agent 3A): constructs ADSL and ADTTE from SDTM domains.
 
 Calls Gemini to produce R code that reads DM.csv and VS.csv, then creates
-ADTTE.rds (for R consumption by Stats agent) and ADTTE_summary.json (for
-Python-side validation by SchemaValidator).
+ADSL.csv (subject-level dataset), ADSL_summary.json, ADTTE.rds (for R
+consumption by Stats agent), and ADTTE_summary.json (for Python-side
+validation by SchemaValidator).
 """
 
 from pathlib import Path
@@ -13,11 +14,12 @@ from omni_agents.llm.base import BaseLLM, LLMResponse
 
 
 class ADaMAgent(BaseAgent):
-    """Agent 3A: Constructs ADTTE (time-to-event) dataset from SDTM domains.
+    """Agent 3A: Constructs ADSL (Subject-Level) and ADTTE (Time-to-Event) datasets from SDTM domains.
 
     Reads DM.csv and VS.csv produced by the Simulator/SDTM step and
-    generates R code that creates ADTTE.rds plus ADTTE_summary.json.
-    The critical challenge is CNSR convention (0=event) and NA handling.
+    generates R code that creates ADSL.csv, ADSL_summary.json, ADTTE.rds,
+    and ADTTE_summary.json.  The critical challenge is CNSR convention
+    (0=event), NA handling, and ensuring ADTTE derives from ADSL (not DM).
     """
 
     def __init__(
@@ -60,15 +62,19 @@ class ADaMAgent(BaseAgent):
                 f"Error output:\n```\n{context['previous_error']}\n```\n\n"
                 f"Fix the R code. Read DM.csv from '{input_dir}/DM.csv' and "
                 f"VS.csv from '{input_dir}/VS.csv'. "
-                f"Write ADTTE.rds to '{output_dir}/ADTTE.rds' and "
+                f"Write ADSL.csv to '{output_dir}/ADSL.csv', "
+                f"ADSL_summary.json to '{output_dir}/ADSL_summary.json', "
+                f"ADTTE.rds to '{output_dir}/ADTTE.rds', and "
                 f"ADTTE_summary.json to '{output_dir}/ADTTE_summary.json'."
             )
 
         return (
-            f"Generate R code to construct an ADTTE (time-to-event) dataset "
-            f"from CDISC SDTM domains. "
+            f"Generate R code to construct ADSL (Subject-Level Analysis Dataset) "
+            f"and ADTTE (time-to-event) dataset from CDISC SDTM domains. "
             f"Read DM.csv from '{input_dir}/DM.csv' and VS.csv from '{input_dir}/VS.csv'. "
-            f"Write ADTTE.rds to '{output_dir}/ADTTE.rds' and "
+            f"Write ADSL.csv to '{output_dir}/ADSL.csv', "
+            f"ADSL_summary.json to '{output_dir}/ADSL_summary.json', "
+            f"ADTTE.rds to '{output_dir}/ADTTE.rds', and "
             f"ADTTE_summary.json to '{output_dir}/ADTTE_summary.json'."
         )
 

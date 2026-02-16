@@ -341,7 +341,7 @@ class PipelineOrchestrator:
             work_dir=adam_dir,
             input_volumes={str(sdtm_dir): "/workspace/input"},
             expected_inputs=["DM.csv", "VS.csv"],
-            expected_outputs=["ADTTE.rds", "ADTTE_summary.json"],
+            expected_outputs=["ADSL.csv", "ADSL_summary.json", "ADTTE.rds", "ADTTE_summary.json"],
             track_id=track_id,
         )
         duration = time.monotonic() - t0
