@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 Symmetric Double Programming** — Phases 1-2 (shipped 2026-02-12)
 - ✅ **v1.1 Pipeline Reliability** — Phase 3 (shipped 2026-02-12)
-- 🚧 **v1.2 Usability & Flexibility** — Phases 5-7 (in progress)
+- 🚧 **v1.2 Usability & Flexibility** — Phases 5-8 (in progress)
 
 ## Phases
 
@@ -55,6 +55,7 @@ Plans:
 - [ ] **Phase 5: CSR Data Dictionary Extraction** — Move data dictionary from CSR to standalone CSV files
 - [ ] **Phase 6: Interactive Execution Mode** — Stage-level pause mode for step-by-step pipeline review
 - [ ] **Phase 7: Protocol Parser Agent** — Natural-language .docx to structured trial config
+- [ ] **Phase 8: ADaM ADSL Dataset & Flow Fix** — Add ADSL subject-level dataset, fix ADTTE to derive from ADSL
 
 ## Phase Details
 
@@ -105,10 +106,22 @@ Plans:
 - [ ] 07-02-PLAN.md — LLM structured output (generate_structured on adapters) + ProtocolParserAgent + prompt template
 - [ ] 07-03-PLAN.md — parse-protocol CLI subcommand + Rich confirmation display + integration tests
 
+### Phase 8: ADaM ADSL Dataset & Flow Fix
+**Goal**: ADaM output includes ADSL subject-level dataset per CDISC ADaM IG; ADTTE derives from ADSL instead of SDTM DM
+**Depends on**: Phase 5 (data dictionary infrastructure exists)
+**Requirements**: ADSL-01, ADSL-02, ADSL-03, ADSL-04, ADSL-05, ADSL-06, ADSL-07, ADSL-08, ADSL-09
+**Success Criteria** (what must be TRUE):
+  1. `adam/ADSL.csv` exists with one row per subject containing demographics, treatment vars, population flags, and disposition
+  2. ADTTE R code reads ADSL.csv for subject-level variables instead of joining directly to DM.csv
+  3. ADaM data dictionary covers all ADSL variables
+  4. Schema validator confirms ADSL.csv presence and correct column structure
+**Research**: Unlikely (CDISC ADSL spec is well-defined, implementation is standard R code)
+**Plans**: TBD (to be created by /gsd:plan-phase)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 5 → 6 → 7
+Phases execute in numeric order: 5 → 6 → 7 → 8
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -118,3 +131,4 @@ Phases execute in numeric order: 5 → 6 → 7
 | 5. CSR Data Dictionary Extraction | v1.2 | 0/1 | Planned | - |
 | 6. Interactive Execution Mode | v1.2 | 0/1 | Planned | - |
 | 7. Protocol Parser Agent | v1.2 | 0/3 | Planned | - |
+| 8. ADaM ADSL Dataset & Flow Fix | v1.2 | 0/? | Planned | - |

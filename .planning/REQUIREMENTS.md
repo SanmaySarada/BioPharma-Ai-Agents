@@ -41,6 +41,18 @@
 - [ ] **DICT-04**: Data dictionaries generated deterministically by orchestrator (no LLM call)
 - [ ] **DICT-05**: Schema validator checks for data_dictionary.csv presence in output directories
 
+### ADaM ADSL Dataset
+
+- [ ] **ADSL-01**: ADSL.csv generated in adam/ output directory with one row per subject containing CDISC ADaM subject-level variables
+- [ ] **ADSL-02**: ADSL includes demographics (USUBJID, SUBJID, AGE, AGEU, AGEGR1, SEX, RACE) from DM domain
+- [ ] **ADSL-03**: ADSL includes ADaM treatment variables (ARM, ARMCD, TRT01P, TRT01A) mapped from SDTM
+- [ ] **ADSL-04**: ADSL includes population flags (SAFFL, ITTFL, EFFFL) derived from randomization and post-baseline data
+- [ ] **ADSL-05**: ADSL includes disposition (EOSSTT, DCSREAS) derived from VS dropout detection
+- [ ] **ADSL-06**: ADSL includes treatment timing (TRTSDT, TRTEDT, TRTDUR) derived from visit data
+- [ ] **ADSL-07**: ADTTE derives subject-level variables (AGE, SEX, ARM, ARMCD) from ADSL via merge, not directly from SDTM DM
+- [ ] **ADSL-08**: ADaM data dictionary includes ADSL variable definitions
+- [ ] **ADSL-09**: Schema validator checks ADSL.csv presence and column structure in adam/ directory
+
 ### Interactive Mode
 
 - [ ] **INTER-01**: `--interactive` CLI flag enables stage-level pause mode
@@ -113,14 +125,23 @@ Which phases cover which requirements. Updated by create-roadmap.
 | PARSE-03 | Phase 7 | Pending |
 | PARSE-04 | Phase 7 | Pending |
 | PARSE-05 | Phase 7 | Pending |
+| ADSL-01 | Phase 8 | Pending |
+| ADSL-02 | Phase 8 | Pending |
+| ADSL-03 | Phase 8 | Pending |
+| ADSL-04 | Phase 8 | Pending |
+| ADSL-05 | Phase 8 | Pending |
+| ADSL-06 | Phase 8 | Pending |
+| ADSL-07 | Phase 8 | Pending |
+| ADSL-08 | Phase 8 | Pending |
+| ADSL-09 | Phase 8 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 8 complete
-- v1.2 requirements: 16 pending (all mapped)
-- Total v1 requirements: 24
-- Mapped to phases: 24
+- v1.2 requirements: 25 pending (all mapped)
+- Total v1 requirements: 33
+- Mapped to phases: 33
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-12*
-*Last updated: 2026-02-14 after v1.2 roadmap creation*
+*Last updated: 2026-02-15 after ADSL requirements added*

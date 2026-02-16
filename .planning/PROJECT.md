@@ -39,6 +39,7 @@ Pipeline completes end-to-end reliably. Inf trap and survfit column-name bugs fi
 - [ ] Protocol parser agent: natural-language .docx → structured trial config
 - [ ] Data dictionary as standalone file in sdtm/adam folder, not in CSR
 - [ ] Interactive execution mode (pause between steps, Enter to continue)
+- [ ] ADaM ADSL dataset: subject-level analysis dataset per CDISC ADaM IG, with ADTTE deriving from ADSL instead of DM
 
 ### Out of Scope
 
